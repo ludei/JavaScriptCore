@@ -1,0 +1,2456 @@
+2014-11-11  Andreas Kling  <akling@apple.com>
+
+        Another assertion fix for debug builds after r175846.
+
+        generateByIdStub() can now be called with an empty prototype chain
+        if kind == GetUndefined, so tweak the assertion to cover that.
+
+        * jit/Repatch.cpp:
+        (JSC::generateByIdStub):
+
+2014-11-10  Andreas Kling  <akling@apple.com>
+
+        Assertion fix for debug builds after r175846.
+
+        PropertySlot::slotBase() will assert if the slot is unset, so reorder
+        the tests to check for isCacheableValue() first.
+
+        * jit/Repatch.cpp:
+        (JSC::tryCacheGetByID):
+
+2014-11-10  Andreas Kling  <akling@apple.com>
+
+        The JIT should cache property lookup misses.
+        <https://webkit.org/b/135578>
+
+        Add support for inline caching of missed property lookups.
+        Previously this would banish us to C++ slow path.
+
+        It's implemented as a simple GetById cache that returns jsUndefined()
+        as long as the Structure chain check passes. There's no DFG exploitation
+        of this knowledge in this patch.
+
+        Test: js/regress/undefined-property-access.js (~5.5x speedup)
+
+        Reviewed by Filip Pizlo.
+
+        * bytecode/PolymorphicGetByIdList.h:
+        * bytecode/GetByIdStatus.cpp:
+        (JSC::GetByIdStatus::computeForStubInfo):
+
+            Add GetByIdAccess::SimpleMiss so we can communicate to the DFG that
+            the access has been cached.
+
+        * jit/Repatch.cpp:
+        (JSC::toString):
+        (JSC::kindFor):
+        (JSC::generateByIdStub):
+        (JSC::tryCacheGetByID):
+        (JSC::tryBuildGetByIDList):
+
+            Added a GetUndefined stub kind, just a simple "store jsUndefined()" snippet.
+            Use this to cache missed lookups, piggybacking mostly on the GetValue kind.
+
+        * runtime/PropertySlot.h:
+        (JSC::PropertySlot::isUnset):
+
+            Exposed the unset state so PropertySlot can communicate that lookup failed.
+
+2014-11-10  Michael Saboff  <msaboff@apple.com>
+
+        Add scope operand to op_create_lexical_environment
+        https://bugs.webkit.org/show_bug.cgi?id=138588
+
+        Reviewed by Geoffrey Garen.
+
+        Added a second operand to op_create_lexical_environment that contains the scope register
+        to update.  Note that the DFG relies on operationCreateActivation() to update the
+        scope register since we can't issue a set() with a non-local, non-argument register.
+        This is temporary until the scope register is allocated as a local.
+
+        * bytecode/BytecodeList.json:
+        * bytecode/CodeBlock.cpp:
+        (JSC::CodeBlock::dumpBytecode):
+        Added the scope register operand.
+
+        * bytecompiler/BytecodeGenerator.cpp:
+        (JSC::BytecodeGenerator::BytecodeGenerator):
+        Filled in the scope register operand.
+
+        * jit/JITOpcodes.cpp:
+        (JSC::JIT::emit_op_create_lexical_environment):
+        * jit/JITOpcodes32_64.cpp:
+        (JSC::JIT::emit_op_create_lexical_environment):
+        * llint/LLIntSlowPaths.cpp:
+        (JSC::LLInt::LLINT_SLOW_PATH_DECL):
+        * llint/LowLevelInterpreter32_64.asm:
+        * llint/LowLevelInterpreter64.asm:
+        Set the scope register with the result of the appropriate create activation slow call.
+
+2014-11-09  Akos Kiss  <akiss@inf.u-szeged.hu>
+
+        Fix 'noreturn' function does return warning in LLVMOverrides.cpp
+        https://bugs.webkit.org/show_bug.cgi?id=138306
+
+        Reviewed by Filip Pizlo.
+
+        Adding NO_RETURN where needed.
+
+        * llvm/library/LLVMExports.cpp:
+        (initializeAndGetJSCLLVMAPI):
+        * llvm/library/LLVMOverrides.cpp:
+        * llvm/library/LLVMTrapCallback.h:
+
+2014-11-07  Dániel Bátyai  <dbatyai.u-szeged@partner.samsung.com>
+
+        Fix an alignment issue with operationPushCatchScope on ARMv7
+        https://bugs.webkit.org/show_bug.cgi?id=138510
+
+        Reviewed by Csaba Osztrogonác.
+
+        * jit/CCallHelpers.h:
+        (JSC::CCallHelpers::setupArgumentsWithExecState):
+        * jit/JITInlines.h:
+        (JSC::JIT::callOperation):
+
+2014-11-07  Michael Saboff  <msaboff@apple.com>
+
+        Update scope related slow path code to use scope register added to opcodes
+        https://bugs.webkit.org/show_bug.cgi?id=138254
+
+        Reviewed by Mark Lam.
+
+        Updated slow paths for op_pop_scope, op_push_name_scope and op_push_with_scope.
+        Added scope register index parameter to the front of the relevant argument lists of the
+        slow functions.  In the case of op_push_name_scope for x86 (32 bit), there aren't enough
+        registers to accomodate all the parameters.  Therefore, added two new JSVALUE32_64 slow
+        paths called operationPushCatchScope() and operationPushFunctionNameScope() to eliminate
+        the last "type" argument.
+        
+
+        * assembler/MacroAssemblerCodeRef.h:
+        (JSC::FunctionPtr::FunctionPtr): Added a new template to take 6 arguments.
+
+        * jit/CCallHelpers.h:
+        (JSC::CCallHelpers::setupArgumentsWithExecState):
+        * jit/JIT.h:
+        * jit/JITInlines.h:
+        (JSC::JIT::callOperation):
+        New variants of setupArgumentsWithExecState() and callOperation() to handle the new
+        combinations of argument types and counts.
+
+        * jit/JITOpcodes.cpp:
+        (JSC::JIT::emit_op_push_with_scope):
+        (JSC::JIT::emit_op_pop_scope):
+        (JSC::JIT::emit_op_push_name_scope):
+        * jit/JITOpcodes32_64.cpp:
+        (JSC::JIT::emit_op_push_with_scope):
+        (JSC::JIT::emit_op_pop_scope):
+        (JSC::JIT::emit_op_push_name_scope):
+        Use the new slow paths.
+
+        * jit/JITOperations.cpp:
+        * jit/JITOperations.h:
+        Updates to set the scope result using the scope register index.  Added operationPushCatchScope()
+        and operationPushFunctionNameScope().
+
+        * llint/LLIntSlowPaths.cpp:
+        (JSC::LLInt::LLINT_SLOW_PATH_DECL):
+        Updated the scope slow paths to use the scope register index in the instruction to read and
+        write the register instead of using CallFrame::scope() and CallFrame::setScope().
+
+2014-11-07  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Apply std::unique_ptr to slowPathCall()
+        https://bugs.webkit.org/show_bug.cgi?id=138489
+
+        Reviewed by Mark Lam.
+
+        As a step to use std::unique_ptr<>, this patch makes slowPathCall() use std::unique_ptr<>,
+        std::make_unique<>, and WTF::move(). 
+
+        * dfg/DFGSlowPathGenerator.h:
+        (JSC::DFG::slowPathCall):
+        (JSC::DFG::slowPathMove):
+        * dfg/DFGSpeculativeJIT.cpp:
+        (JSC::DFG::SpeculativeJIT::emitAllocateJSArray):
+        (JSC::DFG::SpeculativeJIT::addSlowPathGenerator):
+        (JSC::DFG::SpeculativeJIT::arrayify):
+        (JSC::DFG::SpeculativeJIT::compileIn):
+        (JSC::DFG::SpeculativeJIT::compileGetByValOnString):
+        * dfg/DFGSpeculativeJIT.h:
+        * dfg/DFGSpeculativeJIT32_64.cpp:
+        (JSC::DFG::SpeculativeJIT::cachedGetById):
+        (JSC::DFG::SpeculativeJIT::cachedPutById):
+        (JSC::DFG::SpeculativeJIT::nonSpeculativeNonPeepholeCompare):
+        (JSC::DFG::SpeculativeJIT::compile):
+        * dfg/DFGSpeculativeJIT64.cpp:
+        (JSC::DFG::SpeculativeJIT::cachedGetById):
+        (JSC::DFG::SpeculativeJIT::cachedPutById):
+        (JSC::DFG::SpeculativeJIT::nonSpeculativeNonPeepholeCompare):
+        (JSC::DFG::SpeculativeJIT::nonSpeculativeNonPeepholeStrictEq):
+        (JSC::DFG::SpeculativeJIT::compile):
+
+2014-11-06  Mark Lam  <mark.lam@apple.com>
+
+        slow_path_get_direct_pname() needs to be hardened against a constant baseValue.
+        <https://webkit.org/b/138476>
+
+        Reviewed by Michael Saboff.
+
+        slow_path_get_direct_pname() currently assumes that the baseValue is always a
+        non-constant virtual register.  However, this is not always the case like in the
+        following:
+
+            function foo() {
+                var o = { a:1 };
+                for (var n in o)
+                    0[n];
+            }
+            foo();
+
+        This patch fixes it to also check for constant virtual register indexes.
+
+        * runtime/CommonSlowPaths.cpp:
+        (JSC::SLOW_PATH_DECL):
+
+2014-11-06  Michael Saboff  <msaboff@apple.com>
+
+        REGRESSION (r174985-174986): Site display disappears 
+        https://bugs.webkit.org/show_bug.cgi?id=138082
+
+        Reviewed by Geoffrey Garen.
+
+        In support of the change in WebCore, this adds a new functor class to unwind to our
+        caller's frame possibly skipping of intermediate C++ frames.
+
+        * interpreter/StackVisitor.h:
+        (JSC::CallerFunctor::CallerFunctor):
+        (JSC::CallerFunctor::callerFrame):
+        (JSC::CallerFunctor::operator()):
+
+2014-11-06  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Use std::unique_ptr in CodeBlock class
+        https://bugs.webkit.org/show_bug.cgi?id=138395
+
+        Reviewed by Darin Adler.
+
+        * bytecode/CodeBlock.h: Use std::unique_ptr.
+        (JSC::CodeBlock::setJITCodeMap):
+        * jit/CompactJITCodeMap.h: Use std::unique_ptr instead of OwnPtr|PassOwnPtr.
+        (JSC::CompactJITCodeMap::CompactJITCodeMap):
+        (JSC::CompactJITCodeMap::Encoder::finish): Use std::unique_ptr instead of PassOwnPtr.
+
+2014-11-05  Mark Lam  <mark.lam@apple.com>
+
+        PutById inline caches should have a store barrier when it triggers a structure transition.
+        <https://webkit.org/b/138441>
+
+        Reviewed by Geoffrey Garen.
+
+        After r174025, we no longer insert DFG store barriers when the payload of a
+        PutById operation is not a cell.  However, this can lead to a crash when we have
+        PutById inline cache code transitioning the structure and re-allocating the
+        butterfly of an old gen object.  The lack of a store barrier in that inline
+        cache results in the old gen object not being noticed during an eden GC scan.
+        As a result, its newly allocated butterfly will not be kept alive, which leads
+        to a stale butterfly pointer and, eventually, a crash.
+
+        It is also possible that the new structure can be collected by the eden GC if
+        (at GC time):
+        1. It is in the eden gen.
+        2. The inline cache that installed it has been evicted.
+        3. There are no live eden gen objects referring to it.
+
+        The chances of this should be more rare than the butterfly re-allocation, but
+        it is still possible.  Hence, the fix is to always add a store barrier if the
+        inline caches performs a structure transition.
+
+        * jit/Repatch.cpp:
+        (JSC::emitPutTransitionStub):
+        - Added store barrier code based on SpeculativeJIT::storeToWriteBarrierBuffer()'s
+          implementation.
+
+2014-11-05  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Use std::unique_ptr in JSClassRef and JSCallbackObject
+        https://bugs.webkit.org/show_bug.cgi?id=138402
+
+        Reviewed by Geoffrey Garen.
+
+        * API/JSCallbackObject.h: Use std::unique_ptr instead of OwnPtr|PassOwnPtr.
+        (JSC::JSCallbackObjectData::setPrivateProperty): ditto.
+        * API/JSClassRef.cpp: ditto.
+        * API/JSClassRef.h: ditto.
+
+2014-11-05  Michael Saboff  <msaboff@apple.com>
+
+        Disable flakey float32-repeat-out-of-bounds.js and int8-repeat-out-of-bounds.js tests for ARM64
+        https://bugs.webkit.org/show_bug.cgi?id=138381
+
+        Reviewed by Mark Lam.
+
+        Disabled these test for ARM64.  Will address the failures and then re-enable.
+
+        * tests/stress/float32-repeat-out-of-bounds.js:
+        * tests/stress/int8-repeat-out-of-bounds.js:
+
+2014-11-05  Alexey Proskuryakov  <ap@apple.com>
+
+        Incorrect sandbox_check in RemoteInspector.mm
+        https://bugs.webkit.org/show_bug.cgi?id=138408
+
+        Reviewed by Joseph Pecoraro.
+
+        * inspector/remote/RemoteInspector.mm:
+        (Inspector::canAccessWebInspectorMachPort):
+
+2014-11-03  Dean Jackson  <dino@apple.com>
+
+        Add ENABLE_FILTERS_LEVEL_2 feature guard.
+        https://bugs.webkit.org/show_bug.cgi?id=138362
+
+        Reviewed by Tim Horton.
+
+        Add a new feature define for Level 2 of CSS Filters.
+        http://dev.w3.org/fxtf/filters-2/
+
+        * Configurations/FeatureDefines.xcconfig:
+
+2014-11-04  Mark Lam  <mark.lam@apple.com>
+
+        Rename checkMarkByte() to jumpIfIsRememberedOrInEden().
+        <https://webkit.org/b/138369>
+
+        Reviewed by Geoffrey Garen.
+
+        Write barriers are needed for GC Eden collections so that we can scan pointers
+        pointing from old generation objects to eden generation objects.  The barrier
+        currently checks the mark byte in a cell to see if we should skip adding the
+        cell to the GC remembered set.  The addition should be skipped if:
+
+        1. The cell is in the young generation.  It has no old to eden pointers by
+           definition.
+        2. The cell is already in the remembered set.  While it is ok to add the cell
+           to the GC remembered set more than once, it would be redundant.  Hence,
+           we skip this as an optimization to avoid doing unnecessary work.
+
+        The barrier currently names this check as checkMarkByte().  We should rename it
+        to jumpIfIsRememberedOrInEden() to be clearer about its intent.
+
+        Similarly, Jump results of this check are currently named
+        ownerNotMarkedOrAlreadyRemembered.  This can be misinterpreted as the owner is
+        not marked or not already remembered.  We should rename it to
+        ownerIsRememberedOrInEden which is clearer about the intent of the
+        check.  What we are really checking for is that the cell is in the eden gen,
+        which is implied by it being "not marked".
+
+        * dfg/DFGOSRExitCompilerCommon.cpp:
+        (JSC::DFG::osrWriteBarrier):
+        * dfg/DFGSpeculativeJIT.cpp:
+        (JSC::DFG::SpeculativeJIT::writeBarrier):
+        * dfg/DFGSpeculativeJIT32_64.cpp:
+        (JSC::DFG::SpeculativeJIT::writeBarrier):
+        * dfg/DFGSpeculativeJIT64.cpp:
+        (JSC::DFG::SpeculativeJIT::writeBarrier):
+        * jit/AssemblyHelpers.h:
+        (JSC::AssemblyHelpers::jumpIfIsRememberedOrInEden):
+        (JSC::AssemblyHelpers::checkMarkByte): Deleted.
+        * jit/JITPropertyAccess.cpp:
+        (JSC::JIT::emitWriteBarrier):
+        * llint/LowLevelInterpreter.asm:
+        * llint/LowLevelInterpreter32_64.asm:
+        * llint/LowLevelInterpreter64.asm:
+        * runtime/JSCell.h:
+
+2014-11-04  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Pause on exceptions should show the actual exception
+        https://bugs.webkit.org/show_bug.cgi?id=63096
+
+        Reviewed by Timothy Hatcher.
+
+        * debugger/Debugger.h:
+        Expose accessor for the pause reason to subclasses.
+
+        * inspector/JSInjectedScriptHost.cpp:
+        (Inspector::JSInjectedScriptHost::type):
+        New "error" subtype for error objects.
+
+        * inspector/InjectedScriptSource.js:
+        When an object is an error object, use toString to provide a richer description.
+
+        * inspector/protocol/Runtime.json:
+        Expose a new "error" subtype for Error types (TypeError, ReferenceError, EvalError, etc).
+
+        * inspector/protocol/Debugger.json:
+        Provide type checked objects for different Debugger.pause pause reasons.
+        An exception provides the thrown object, but assert / CSP pauses provide
+        a richer typed object as the auxiliary data.
+
+        * inspector/ScriptDebugServer.cpp:
+        (Inspector::ScriptDebugServer::dispatchDidPause):
+        When paused because of an exception, pass the exception on.
+
+        * inspector/agents/InspectorDebuggerAgent.h:
+        * inspector/agents/InspectorDebuggerAgent.cpp:
+        (Inspector::InspectorDebuggerAgent::handleConsoleAssert):
+        (Inspector::InspectorDebuggerAgent::scriptExecutionBlockedByCSP):
+        Provide richer data in pause events.
+
+        * inspector/scripts/codegen/generate_backend_commands.py:
+        (BackendCommandsGenerator.generate_domain.is_anonymous_enum_param):
+        (BackendCommandsGenerator.generate_domain):
+        * inspector/scripts/tests/expected/enum-values.json-result:
+        Generate frontend enums for anonymous enum event parameters.
+
+2014-11-04  Michael Saboff  <msaboff@apple.com>
+
+        Disable flakey float32-repeat-out-of-bounds.js and int8-repeat-out-of-bounds.js tests for ARM64
+        https://bugs.webkit.org/show_bug.cgi?id=138381
+
+        Reviewed by Mark Lam.
+
+        Disabled these test for ARM64.  Will address the failures and then re-enable.
+
+        * tests/stress/float32-repeat-out-of-bounds.js:
+        * tests/stress/int8-repeat-out-of-bounds.js:
+
+2014-11-04  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Enum value collisions between different generators
+        https://bugs.webkit.org/show_bug.cgi?id=138343
+
+        Reviewed by Brian Burg.
+
+        Each generator was using its own filtered list of domains_to_generate
+        to build the shared unique list of enum value encodings. This list
+        was slightly different across different generators. Instead always
+        use the list of all non-supplemental domains to generate the shared
+        list of enum values.
+
+        * inspector/scripts/codegen/generator.py:
+        (Generator.non_supplemental_domains):
+        (Generator.domains_to_generate):
+        (Generator._traverse_and_assign_enum_values):
+        * inspector/scripts/tests/enum-values.json: Added.
+        * inspector/scripts/tests/expected/enum-values.json-result: Added.
+
+2014-11-03  Akos Kiss  <akiss@inf.u-szeged.hu>
+
+        Workaround for Cortex-A53 erratum 835769
+        https://bugs.webkit.org/show_bug.cgi?id=138315
+
+        Reviewed by Filip Pizlo.
+
+        This patch introduces CMake variable and preprocessor macro
+        WTF_CPU_ARM64_CORTEXA53 with the aim of enabling Cortex-A53-specific
+        code paths, if set true. The patch also implements one case where such
+        code paths are needed: the workaround for Cortex-A53 erratum 835769. If
+        WTF_CPU_ARM64_CORTEXA53 is set then:
+        - CMake checks whether the compiler already has support for a workaround
+          and adds -mfix-cortex-a53-835769 to the compiler flags if so,
+        - the ARM64 backend of offlineasm inserts a nop between memory and
+          multiply-accumulate instructions, and
+        - the ARM64 assembler also inserts a nop between memory and (64-bit) 
+          multiply-accumulate instructions.
+
+        * assembler/ARM64Assembler.h:
+        (JSC::ARM64Assembler::madd):
+        Call nopCortexA53Fix835769() to insert a nop if CPU(ARM64_CORTEXA53) and
+        if necessary.
+        (JSC::ARM64Assembler::msub): Likewise.
+        (JSC::ARM64Assembler::smaddl): Likewise.
+        (JSC::ARM64Assembler::smsubl): Likewise.
+        (JSC::ARM64Assembler::umaddl): Likewise.
+        (JSC::ARM64Assembler::umsubl): Likewise.
+        (JSC::ARM64Assembler::nopCortexA53Fix835769):
+        Added. Insert a nop if the previously emitted instruction was a load, a
+        store, or a prefetch, and if the current instruction is 64-bit.
+        * offlineasm/arm64.rb:
+        Add the arm64CortexA53Fix835769 phase and call it from
+        getModifiedListARM64 to insert nopCortexA53Fix835769 between appropriate
+        macro instructions. Also, lower nopCortexA53Fix835769 to nop if
+        CPU(ARM64_CORTEXA53), to nothing otherwise.
+        * offlineasm/instructions.rb:
+        Define macro instruction nopFixCortexA53Err835769.
+
+2014-11-03  Commit Queue  <commit-queue@webkit.org>
+
+        Unreviewed, rolling out r175509.
+        https://bugs.webkit.org/show_bug.cgi?id=138349
+
+        broke some builds (Requested by msaboff on #webkit).
+
+        Reverted changeset:
+
+        "Update scope related slow path code to use scope register
+        added to opcodes"
+        https://bugs.webkit.org/show_bug.cgi?id=138254
+        http://trac.webkit.org/changeset/175509
+
+2014-11-03  Michael Saboff  <msaboff@apple.com>
+
+        Update scope related slow path code to use scope register added to opcodes
+        https://bugs.webkit.org/show_bug.cgi?id=138254
+
+        Reviewed by Mark Lam.
+
+        Updated slow paths for op_pop_scope, op_push_name_scope and op_push_with_scope.
+        Added scope register index parameter to the front of the relevant argument lists of the
+        slow functions.  In the case of op_push_name_scope for x86 (32 bit), there aren't enough
+        registers to accomodate all the parameters.  Therefore, added two new JSVALUE32_64 slow
+        paths called operationPushCatchScope() and operationPushFunctionNameScope() to eliminate
+        the last "type" argument.
+        
+
+        * assembler/MacroAssemblerCodeRef.h:
+        (JSC::FunctionPtr::FunctionPtr): Added a new template to take 6 arguments.
+
+        * jit/CCallHelpers.h:
+        (JSC::CCallHelpers::setupArgumentsWithExecState):
+        * jit/JIT.h:
+        * jit/JITInlines.h:
+        (JSC::JIT::callOperation):
+        New variants of setupArgumentsWithExecState() and callOperation() to handle the new
+        combinations of argument types and counts.
+
+        * jit/JITOpcodes.cpp:
+        (JSC::JIT::emit_op_push_with_scope):
+        (JSC::JIT::emit_op_pop_scope):
+        (JSC::JIT::emit_op_push_name_scope):
+        * jit/JITOpcodes32_64.cpp:
+        (JSC::JIT::emit_op_push_with_scope):
+        (JSC::JIT::emit_op_pop_scope):
+        (JSC::JIT::emit_op_push_name_scope):
+        Use the new slow paths.
+
+        * jit/JITOperations.cpp:
+        * jit/JITOperations.h:
+        Updates to set the scope result using the scope register index.  Added operationPushCatchScope()
+        and operationPushFunctionNameScope().
+
+        * llint/LLIntSlowPaths.cpp:
+        (JSC::LLInt::LLINT_SLOW_PATH_DECL):
+        Updated the scope slow paths to use the scope register index in the instruction to read and
+        write the register instead of using CallFrame::scope() and CallFrame::setScope().
+
+2014-11-03  Michael Saboff  <msaboff@apple.com>
+
+        Add "get scope" byte code
+        https://bugs.webkit.org/show_bug.cgi?id=138326
+
+        Reviewed by Mark Lam.
+
+        Added op_get_scope.  Added implementations for the LLInt and baseline JIT.
+        Provided nop implementation for DFG and FTL.  The new byte code is emitted
+        after op_enter for any function, program or eval.  It is expected that the
+        DFG will be implemented such that unneeded op_get_scope would be eliminated
+        during DFG compilation.
+
+        * bytecode/BytecodeList.json:
+        * bytecode/BytecodeUseDef.h:
+        (JSC::computeUsesForBytecodeOffset):
+        (JSC::computeDefsForBytecodeOffset):
+        Added new op_get_scope bytecode.
+
+        * bytecompiler/BytecodeGenerator.cpp:
+        (JSC::BytecodeGenerator::BytecodeGenerator):
+        (JSC::BytecodeGenerator::emitGetScope):
+        * bytecompiler/BytecodeGenerator.h:
+        Emit new op_get_scope bytecode.
+
+        * dfg/DFGByteCodeParser.cpp:
+        (JSC::DFG::ByteCodeParser::parseBlock):
+        * dfg/DFGCapabilities.cpp:
+        (JSC::DFG::capabilityLevel):
+        Added framework for new op_get_scope bytecode.
+
+        * bytecode/CodeBlock.cpp:
+        (JSC::CodeBlock::dumpBytecode):
+        * jit/JIT.cpp:
+        (JSC::JIT::privateCompileMainPass):
+        * jit/JIT.h:
+        * jit/JITOpcodes.cpp:
+        (JSC::JIT::emit_op_get_scope):
+        * jit/JITOpcodes32_64.cpp:
+        (JSC::JIT::emit_op_get_scope):
+        * llint/LowLevelInterpreter32_64.asm:
+        * llint/LowLevelInterpreter64.asm:
+        Implementation of op_get_scope bytecode.
+
+2014-11-03  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Fix RWIProtocol 64-to-32 bit conversion warnings
+        https://bugs.webkit.org/show_bug.cgi?id=138325
+
+        Reviewed by Timothy Hatcher.
+
+        * inspector/InspectorValues.h:
+        Vector's length really is an unsigned, so a static_cast here is fine.
+
+        * inspector/scripts/codegen/generate_objective_c.py:
+        (ObjCGenerator.objc_type_for_raw_name):
+        Use int instead of NSInteger for APIs that eventually map to
+        InspectorObject's setInteger, which takes an int.
+
+        * inspector/scripts/tests/expected/commands-with-async-attribute.json-result:
+        * inspector/scripts/tests/expected/commands-with-optional-call-return-parameters.json-result:
+        * inspector/scripts/tests/expected/events-with-optional-parameters.json-result:
+        * inspector/scripts/tests/expected/generate-domains-with-feature-guards.json-result:
+        * inspector/scripts/tests/expected/type-declaration-object-type.json-result:
+        * inspector/scripts/tests/expected/type-requiring-runtime-casts.json-result:
+        Rebaselined results with the type change.
+
+2014-11-03  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Show Selector's Specificity
+        https://bugs.webkit.org/show_bug.cgi?id=138189
+
+        Reviewed by Timothy Hatcher.
+
+        * inspector/protocol/CSS.json:
+        Create a new named type CSSSelector to include a selector's text and specificity.
+        The specificity tuple is optional as it may soon be made dynamic in some cases.
+
+2014-11-03  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: ObjC Protocol Interfaces should throw exceptions for nil arguments
+        https://bugs.webkit.org/show_bug.cgi?id=138221
+
+        Reviewed by Timothy Hatcher.
+
+        The RWIProtocol APIs will now raise exceptions when:
+
+          - any properties are set on a type with a nil value or key (handled by RWIProtocolJSONObject)
+          - required parameters in type constructors have nil value
+          - required or optional command return parameters have nil values
+          - required or optional event parameters have nil values
+
+        The exceptions include the name of the field when possible.
+
+        * inspector/scripts/codegen/generate_objective_c.py:
+        (ObjCGenerator.is_type_objc_pointer_type):
+        Provide a quick check to see if type would be a pointer or not
+        in the ObjC API. Enums for example are not pointers in the API
+        because we manage converting them to/from strings.
+
+        * inspector/scripts/codegen/generate_objective_c_backend_dispatcher_implementation.py:
+        (ObjectiveCConfigurationImplementationGenerator._generate_success_block_for_command):
+        * inspector/scripts/codegen/generate_objective_c_frontend_dispatcher_implementation.py:
+        (ObjectiveCFrontendDispatcherImplementationGenerator._generate_event):
+        * inspector/scripts/codegen/generate_objective_c_types_implementation.py:
+        (ObjectiveCTypesImplementationGenerator._generate_init_method_for_required_members):
+        (ObjectiveCTypesImplementationGenerator._generate_setter_for_member):
+        Throw exceptions when nil values are disallowed.
+
+        * inspector/scripts/tests/expected/commands-with-async-attribute.json-result:
+        * inspector/scripts/tests/expected/commands-with-optional-call-return-parameters.json-result:
+        * inspector/scripts/tests/expected/events-with-optional-parameters.json-result:
+        * inspector/scripts/tests/expected/generate-domains-with-feature-guards.json-result:
+        * inspector/scripts/tests/expected/type-declaration-object-type.json-result:
+        * inspector/scripts/tests/expected/type-requiring-runtime-casts.json-result:
+        Rebaseline tests which include the exception raise calls.
+
+2014-11-03  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: ALTERNATE_DISPATCHERS Let the frontend know about extra agents
+        https://bugs.webkit.org/show_bug.cgi?id=138236
+
+        Reviewed by Brian Burg.
+
+        Inform the frontend about any extra domains the backend may have
+        above and beyond the default list of domains for the debuggable type.
+        This approach means there is almost no cost to normal debugging.
+        When a JSContext is debugged with extra agents, a message is sent
+        to the frontend letting it know which domains to then activate,
+        and perform any initialization work that may be required.
+
+        * inspector/InspectorAgentBase.h:
+        (Inspector::InspectorAgentBase::domainName):
+        * inspector/InspectorAgentRegistry.cpp:
+        (Inspector::InspectorAgentRegistry::appendExtraAgent):
+        * inspector/InspectorAgentRegistry.h:
+        * inspector/scripts/codegen/generator_templates.py:
+        Provide a way to get a list of just the extra domains.
+        To aggregate this list provide a different "append"
+        specifically for extra agents.
+
+        * inspector/JSGlobalObjectInspectorController.h:
+        * inspector/JSGlobalObjectInspectorController.cpp:
+        (Inspector::JSGlobalObjectInspectorController::JSGlobalObjectInspectorController):
+        (Inspector::JSGlobalObjectInspectorController::connectFrontend):
+        When a frontend connects, inform it of the extra domains.
+
+        * inspector/protocol/Inspector.json:
+        * inspector/agents/InspectorAgent.h:
+        * inspector/agents/InspectorAgent.cpp:
+        (Inspector::InspectorAgent::enable):
+        (Inspector::InspectorAgent::activateExtraDomains):
+        Send an event with the extra domains to activate.
+
+2014-11-01  Michael Saboff  <msaboff@apple.com>
+
+        Add scope operand to op_resolve_scope
+        https://bugs.webkit.org/show_bug.cgi?id=138253
+
+        Reviewed by Mark Lam.
+
+        Added scope operand to op_resolve_scope.  Although the scope register is filled in with
+        the ScopeChain register, this operand is not used in the processing of the bytecode.
+        That will be addressed in a future patch.
+
+        * bytecode/BytecodeList.json: Lengthened the three bytecodes.
+        * bytecode/CodeBlock.cpp:
+        (JSC::CodeBlock::dumpBytecode): Added code to dump the scope operand.
+
+        (JSC::CodeBlock::CodeBlock): 
+        (JSC::CodeBlock::finalizeUnconditionally):
+        Updated the operand indecies for the processing of op_resolve_scope.
+
+        * bytecompiler/BytecodeGenerator.cpp:
+        (JSC::BytecodeGenerator::emitResolveScope):
+        (JSC::BytecodeGenerator::emitGetOwnScope):
+        (JSC::BytecodeGenerator::emitReturn):
+        Added scope register to these emit functions and the bytecodes they emit.
+
+        * dfg/DFGByteCodeParser.cpp:
+        (JSC::DFG::ByteCodeParser::parseBlock):
+        * dfg/DFGCapabilities.cpp:
+        (JSC::DFG::capabilityLevel):
+        * jit/JITPropertyAccess.cpp:
+        (JSC::JIT::emit_op_resolve_scope):
+        (JSC::JIT::emitSlow_op_resolve_scope):
+        * jit/JITPropertyAccess32_64.cpp:
+        (JSC::JIT::emit_op_resolve_scope):
+        (JSC::JIT::emitSlow_op_resolve_scope):
+        * llint/LLIntSlowPaths.cpp:
+        (JSC::LLInt::LLINT_SLOW_PATH_DECL):
+        * llint/LowLevelInterpreter32_64.asm:
+        * llint/LowLevelInterpreter64.asm:
+        Updated the operand indecies for the processing of op_resolve_scope.
+
+2014-11-01  Carlos Garcia Campos  <cgarcia@igalia.com>
+
+        REGRESSION(CMake): Make it possible to build without introspection
+        https://bugs.webkit.org/show_bug.cgi?id=138006
+
+        Reviewed by Philippe Normand.
+
+        Do not install introspection files when introspection is disabled.
+
+        * PlatformGTK.cmake:
+
+2014-10-31  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Use std::unique_ptr for TypeCountSet
+        https://bugs.webkit.org/show_bug.cgi?id=138242
+
+        Reviewed by Andreas Kling.
+
+        * heap/Heap.cpp:
+        (JSC::Heap::protectedObjectTypeCounts):
+        Use std::unique_ptr<> instead of PassOwnPtr|OwnPtr.
+        (JSC::Heap::objectTypeCounts): ditto.
+        * heap/Heap.h:
+
+2014-10-31  Michael Saboff  <msaboff@apple.com>
+
+        Add scope operand to op_push_with_scope, op_push_name_scope and op_pop_scope
+        https://bugs.webkit.org/show_bug.cgi?id=138252
+
+        Reviewed by Geoffrey Garen.
+
+        Added scope operand to op_push_with_scope, op_push_name_scope and op_pop_scope.
+        Although the scope register is filled in with the ScopeChain register for all 
+        three bytecodes, this operand is not used in the processing of the bytecodes.
+        That will be addressed in a future patch.
+
+        * bytecode/BytecodeList.json: Lengthened the three bytecodes.
+        * bytecode/CodeBlock.cpp:
+        (JSC::CodeBlock::dumpBytecode): Added code to dump the scope operand.
+        * bytecompiler/BytecodeGenerator.cpp:
+        (JSC::BytecodeGenerator::BytecodeGenerator):
+        (JSC::BytecodeGenerator::emitPushWithScope):
+        (JSC::BytecodeGenerator::emitPopScope):
+        (JSC::BytecodeGenerator::emitComplexPopScopes):
+        (JSC::BytecodeGenerator::emitPopScopes):
+        (JSC::BytecodeGenerator::emitPushFunctionNameScope):
+        (JSC::BytecodeGenerator::emitPushCatchScope):
+        * bytecompiler/BytecodeGenerator.h:
+        (JSC::BytecodeGenerator::scopeRegister):
+        Added scope register to these emit functions and the bytecodes they emit.
+        New m_scopeRegister and accessor.
+
+        * bytecompiler/NodesCodegen.cpp:
+        (JSC::ContinueNode::emitBytecode):
+        (JSC::BreakNode::emitBytecode):
+        (JSC::ReturnNode::emitBytecode):
+        (JSC::WithNode::emitBytecode):
+        (JSC::TryNode::emitBytecode):
+        Created a RegisterID for the ScopeChain register and used it to emit the updated
+        bytecodes.
+
+        * jit/JITOpcodes.cpp:
+        (JSC::JIT::emit_op_push_with_scope):
+        (JSC::JIT::emit_op_push_name_scope):
+        * jit/JITOpcodes32_64.cpp:
+        (JSC::JIT::emit_op_push_with_scope):
+        (JSC::JIT::emit_op_push_name_scope):
+        * llint/LLIntSlowPaths.cpp:
+        (JSC::LLInt::LLINT_SLOW_PATH_DECL):
+        * llint/LowLevelInterpreter.asm:
+        Updated the operand indecies for the processing of the updated bytecodes.
+
+2014-10-31  Andreas Kling  <akling@apple.com>
+
+        Make writes to RegExpObject.lastIndex cacheable.
+        <https://webkit.org/b/138255>
+
+        Reviewed by Geoffrey Garen.
+
+        We were neglecting to IC the puts to RegExpObject.lastIndex on Octane/regexp,
+        and ended up spending 4.5% of a time profile in operationPutByIdNonStrict.
+
+        ~3% progression on Octane/regexp.
+
+        * runtime/RegExpObject.cpp:
+        (JSC::regExpObjectSetLastIndexStrict):
+        (JSC::regExpObjectSetLastIndexNonStrict):
+        (JSC::RegExpObject::put):
+
+2014-10-31  Chris Dumez  <cdumez@apple.com>
+
+        Fix a couple of warnings in JSC reported by clang static analyzer
+        https://bugs.webkit.org/show_bug.cgi?id=138240
+
+        Reviewed by Geoffrey Garen.
+
+        Fix a couple of warnings in JSC reported by clang static analyzer about
+        value stored in variables never being read. This is addressed by
+        reducing the scope of the variable or removing the variable entirely.
+
+        * dfg/DFGConstantFoldingPhase.cpp:
+        (JSC::DFG::ConstantFoldingPhase::emitGetByOffset):
+        * runtime/VM.cpp:
+        (JSC::VM::throwException):
+
+2014-10-30  Dana Burkart  <dburkart@apple.com>
+
+        <rdar://problem/18821260> Prepare for the mysterious future
+
+        Reviewed by Lucas Forschler.
+
+        * Configurations/Base.xcconfig:
+        * Configurations/DebugRelease.xcconfig:
+        * Configurations/FeatureDefines.xcconfig:
+        * Configurations/Version.xcconfig:
+
+2014-10-30  Saam Barati  <saambarati1@gmail.com>
+
+        AST Nodes should keep track of their end offset
+        https://bugs.webkit.org/show_bug.cgi?id=138143
+
+        Reviewed by Filip Pizlo.
+
+        AST nodes nodes now have an int property for their end text 
+        offsets. This change lays some foundational work that will be 
+        needed in profiling which basic blocks have executed.
+
+        * parser/ASTBuilder.h:
+        (JSC::ASTBuilder::setEndOffset):
+        * parser/Nodes.h:
+        (JSC::Node::endOffset):
+        (JSC::Node::setEndOffset):
+        * parser/Parser.cpp:
+        (JSC::Parser<LexerType>::parseStatement):
+        (JSC::Parser<LexerType>::parseFunctionInfo):
+        (JSC::Parser<LexerType>::parseExpression):
+        (JSC::Parser<LexerType>::parseProperty):
+        * parser/Parser.h:
+        (JSC::Parser<LexerType>::parse):
+        * parser/SyntaxChecker.h:
+        (JSC::SyntaxChecker::operatorStackPop):
+
+2014-10-30  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Generate ObjC inspector protocol types and alternate dispatcher interfaces
+        https://bugs.webkit.org/show_bug.cgi?id=138048
+
+        Reviewed by Brian Burg.
+
+        Generate Objective-C interfaces for inspector protocol types, command, and event dispatchers.
+        This is very much like the InspectorProtocolTypes, BackendDispatchers, and FrontendDispatchers,
+        but with an ObjC spin on things.
+
+        The private API that clients would use is all encapsulated in RWIProtocol.h. It includes the
+        types interfaces, command handler protocol, and event dispatcher interface. Where possible the
+        API uses real enums, which hides the raw protocol enum strings from clients.
+
+        Inspector protocol types are, like InspectorProtocolObjects, built on top of an InspectorObject.
+        This offers the flexibilty of adding arbitrary key/values using the RWIProtocolJSONObject
+        interface, which may be required for certain protocol objects like "Network.Headers" which
+        have no fields, but expect arbitrary properties to be added.
+
+        Command handler protocols always have two callbacks. An error callback and a success callback.
+        The signature is very much like BackendDispatchers. In parameters are passed directly to
+        the selectors, and out parameters are defined by the success callback. It will be the client's
+        responsibility to call either of these callbacks to complete handling of a request.
+
+        Event dispatcher interfaces are straight forward, just packaging up the arguments and sending
+        the message to the frontend.
+
+        ObjC <-> Protocol conversion happens in each of the generated files. In type getters / setters,
+        in commands parameters and event parameters. For this to work we generate conversion helpers
+        for all enums, ObjC enum <-> protocol strings. For NSArray <-> InspectorArray there are some
+        static helpers to do the conversions. We do lose some type safety in these conversions.
+
+        * JavaScriptCore.xcodeproj/project.pbxproj:
+        * inspector/scripts/codegen/__init__.py:
+        * inspector/scripts/codegen/generate_alternate_backend_dispatcher_header.py:
+        (AlternateBackendDispatcherHeaderGenerator._generate_handler_declarations_for_domain):
+        * inspector/scripts/codegen/generate_backend_dispatcher_header.py:
+        (BackendDispatcherHeaderGenerator._generate_alternate_handler_forward_declarations_for_domains.AlternateInspector):
+        (BackendDispatcherHeaderGenerator._generate_handler_declarations_for_domain):
+        (BackendDispatcherHeaderGenerator._generate_dispatcher_declarations_for_domain):
+        * inspector/scripts/codegen/generate_backend_dispatcher_implementation.py:
+        (BackendDispatcherImplementationGenerator._generate_handler_class_destructor_for_domain):
+        (BackendDispatcherImplementationGenerator._generate_dispatcher_implementations_for_domain):
+        * inspector/scripts/codegen/generate_frontend_dispatcher_header.py:
+        (FrontendDispatcherHeaderGenerator._generate_dispatcher_declarations_for_domain):
+        * inspector/scripts/codegen/generate_frontend_dispatcher_implementation.py:
+        (FrontendDispatcherImplementationGenerator._generate_dispatcher_implementations_for_domain):
+        * inspector/scripts/codegen/generate_objective_c.py: Added.
+        (join_type_and_name):
+        (strip_comment_markers):
+        (remove_duplicate_from_str):
+        (ObjCTypeCategory):
+        (ObjCTypeCategory.category_of_type):
+        (ObjCGenerator):
+        (ObjCGenerator.identifier_to_objc_identifier):
+        (ObjCGenerator.objc_identifier_to_identifier):
+        (ObjCGenerator.should_generate_domain_types_filter):
+        (ObjCGenerator.should_generate_domain_types_filter.should_generate_domain_types):
+        (ObjCGenerator.should_generate_domain_command_handler_filter):
+        (ObjCGenerator.should_generate_domain_command_handler_filter.should_generate_domain_command_handler):
+        (ObjCGenerator.should_generate_domain_event_dispatcher_filter):
+        (ObjCGenerator.should_generate_domain_event_dispatcher_filter.should_generate_domain_event_dispatcher):
+        (ObjCGenerator.objc_name_for_type):
+        (ObjCGenerator.objc_enum_name_for_anonymous_enum_declaration):
+        (ObjCGenerator.objc_enum_name_for_anonymous_enum_member):
+        (ObjCGenerator.objc_enum_name_for_anonymous_enum_parameter):
+        (ObjCGenerator.objc_enum_name_for_non_anonymous_enum):
+        (ObjCGenerator.variable_name_prefix_for_domain):
+        (ObjCGenerator.objc_accessor_type_for_raw_name):
+        (ObjCGenerator.objc_type_for_raw_name):
+        (ObjCGenerator.objc_class_for_raw_name):
+        (ObjCGenerator.protocol_type_for_raw_name):
+        (ObjCGenerator.protocol_type_for_type):
+        (ObjCGenerator.objc_class_for_type):
+        (ObjCGenerator.objc_accessor_type_for_member):
+        (ObjCGenerator.objc_accessor_type_for_member_internal):
+        (ObjCGenerator.objc_type_for_member):
+        (ObjCGenerator.objc_type_for_member_internal):
+        (ObjCGenerator.objc_type_for_param):
+        (ObjCGenerator.objc_type_for_param_internal):
+        (ObjCGenerator.objc_protocol_export_expression_for_variable):
+        (ObjCGenerator.objc_protocol_import_expression_for_member):
+        (ObjCGenerator.objc_protocol_import_expression_for_parameter):
+        (ObjCGenerator.objc_protocol_import_expression_for_variable):
+        (ObjCGenerator.objc_to_protocol_expression_for_member):
+        (ObjCGenerator.protocol_to_objc_expression_for_member):
+        (ObjCGenerator.objc_setter_method_for_member):
+        (ObjCGenerator.objc_setter_method_for_member_internal):
+        (ObjCGenerator.objc_getter_method_for_member):
+        (ObjCGenerator.objc_getter_method_for_member_internal):
+        * inspector/scripts/codegen/generate_objective_c_backend_dispatcher_header.py: Copied from Source/JavaScriptCore/inspector/scripts/codegen/generate_alternate_backend_dispatcher_header.py.
+        (ObjectiveCBackendDispatcherHeaderGenerator):
+        (ObjectiveCBackendDispatcherHeaderGenerator.output_filename):
+        (ObjectiveCBackendDispatcherHeaderGenerator.domains_to_generate):
+        (ObjectiveCBackendDispatcherHeaderGenerator.generate_output):
+        (ObjectiveCBackendDispatcherHeaderGenerator._generate_objc_forward_declarations):
+        (ObjectiveCBackendDispatcherHeaderGenerator._generate_objc_forward_declarations_for_domains):
+        (ObjectiveCBackendDispatcherHeaderGenerator._generate_objc_handler_declarations_for_domain):
+        (ObjectiveCBackendDispatcherHeaderGenerator._generate_objc_handler_declaration_for_command):
+        * inspector/scripts/codegen/generate_objective_c_backend_dispatcher_implementation.py: Added.
+        (ObjectiveCConfigurationImplementationGenerator):
+        (ObjectiveCConfigurationImplementationGenerator.__init__):
+        (ObjectiveCConfigurationImplementationGenerator.output_filename):
+        (ObjectiveCConfigurationImplementationGenerator.domains_to_generate):
+        (ObjectiveCConfigurationImplementationGenerator.generate_output):
+        (ObjectiveCConfigurationImplementationGenerator._generate_handler_implementation_for_domain):
+        (ObjectiveCConfigurationImplementationGenerator._generate_handler_implementation_for_command):
+        (ObjectiveCConfigurationImplementationGenerator._generate_success_block_for_command):
+        (ObjectiveCConfigurationImplementationGenerator._generate_conversions_for_command):
+        (ObjectiveCConfigurationImplementationGenerator._generate_invocation_for_command):
+        * inspector/scripts/codegen/generate_objective_c_configuration_header.py: Copied from Source/JavaScriptCore/inspector/scripts/codegen/generate_alternate_backend_dispatcher_header.py.
+        (ObjectiveCConfigurationHeaderGenerator):
+        (ObjectiveCConfigurationHeaderGenerator.output_filename):
+        (ObjectiveCConfigurationHeaderGenerator.generate_output):
+        (ObjectiveCConfigurationHeaderGenerator._generate_configuration_interface_for_domains):
+        (ObjectiveCConfigurationHeaderGenerator._generate_properties_for_domain):
+        * inspector/scripts/codegen/generate_objective_c_configuration_implementation.py: Added.
+        (ObjectiveCBackendDispatcherImplementationGenerator):
+        (ObjectiveCBackendDispatcherImplementationGenerator.__init__):
+        (ObjectiveCBackendDispatcherImplementationGenerator.output_filename):
+        (ObjectiveCBackendDispatcherImplementationGenerator.generate_output):
+        (ObjectiveCBackendDispatcherImplementationGenerator._generate_configuration_implementation_for_domains):
+        (ObjectiveCBackendDispatcherImplementationGenerator._generate_ivars):
+        (ObjectiveCBackendDispatcherImplementationGenerator._generate_dealloc):
+        (ObjectiveCBackendDispatcherImplementationGenerator._generate_handler_setter_for_domain):
+        (ObjectiveCBackendDispatcherImplementationGenerator._generate_event_dispatcher_getter_for_domain):
+        * inspector/scripts/codegen/generate_objective_c_conversion_helpers.py: Added.
+        (add_whitespace_separator):
+        (ObjectiveCConversionHelpersGenerator):
+        (ObjectiveCConversionHelpersGenerator.__init__):
+        (ObjectiveCConversionHelpersGenerator.output_filename):
+        (ObjectiveCConversionHelpersGenerator.domains_to_generate):
+        (ObjectiveCConversionHelpersGenerator.generate_output):
+        (ObjectiveCConversionHelpersGenerator._generate_enum_conversion_functions):
+        (ObjectiveCConversionHelpersGenerator._generate_anonymous_enum_conversion_for_declaration):
+        (ObjectiveCConversionHelpersGenerator._generate_anonymous_enum_conversion_for_member):
+        (ObjectiveCConversionHelpersGenerator._generate_anonymous_enum_conversion_for_parameter):
+        (ObjectiveCConversionHelpersGenerator._generate_enum_objc_to_protocol_string):
+        (ObjectiveCConversionHelpersGenerator._generate_enum_from_protocol_string):
+        * inspector/scripts/codegen/generate_objective_c_frontend_dispatcher_implementation.py: Added.
+        (ObjectiveCFrontendDispatcherImplementationGenerator):
+        (ObjectiveCFrontendDispatcherImplementationGenerator.__init__):
+        (ObjectiveCFrontendDispatcherImplementationGenerator.output_filename):
+        (ObjectiveCFrontendDispatcherImplementationGenerator.domains_to_generate):
+        (ObjectiveCFrontendDispatcherImplementationGenerator.generate_output):
+        (ObjectiveCFrontendDispatcherImplementationGenerator._generate_event_dispatcher_implementations):
+        (ObjectiveCFrontendDispatcherImplementationGenerator._generate_event):
+        (ObjectiveCFrontendDispatcherImplementationGenerator._generate_event_signature):
+        (ObjectiveCFrontendDispatcherImplementationGenerator._generate_event_out_parameters):
+        * inspector/scripts/codegen/generate_objective_c_header.py: Added.
+        (add_whitespace_separator):
+        (ObjectiveCHeaderGenerator):
+        (ObjectiveCHeaderGenerator.__init__):
+        (ObjectiveCHeaderGenerator.output_filename):
+        (ObjectiveCHeaderGenerator.generate_output):
+        (ObjectiveCHeaderGenerator._generate_forward_declarations):
+        (ObjectiveCHeaderGenerator._generate_enums):
+        (ObjectiveCHeaderGenerator._generate_types):
+        (ObjectiveCHeaderGenerator._generate_anonymous_enum_for_declaration):
+        (ObjectiveCHeaderGenerator._generate_anonymous_enum_for_member):
+        (ObjectiveCHeaderGenerator._generate_anonymous_enum_for_parameter):
+        (ObjectiveCHeaderGenerator._generate_enum):
+        (ObjectiveCHeaderGenerator._generate_enum.NS_ENUM):
+        (ObjectiveCHeaderGenerator._generate_type_interface):
+        (ObjectiveCHeaderGenerator._generate_init_method_for_required_members):
+        (ObjectiveCHeaderGenerator._generate_member_property):
+        (ObjectiveCHeaderGenerator._generate_command_protocols):
+        (ObjectiveCHeaderGenerator._generate_single_command_protocol):
+        (ObjectiveCHeaderGenerator._callback_block_for_command):
+        (ObjectiveCHeaderGenerator._generate_event_interfaces):
+        (ObjectiveCHeaderGenerator._generate_single_event_interface):
+        * inspector/scripts/codegen/generate_objective_c_internal_header.py: Copied from Source/JavaScriptCore/inspector/scripts/codegen/generate_alternate_backend_dispatcher_header.py.
+        (ObjectiveCTypesInternalHeaderGenerator):
+        (ObjectiveCTypesInternalHeaderGenerator.output_filename):
+        (ObjectiveCTypesInternalHeaderGenerator.generate_output):
+        (ObjectiveCTypesInternalHeaderGenerator._generate_event_dispatcher_private_interfaces):
+        * inspector/scripts/codegen/generate_objective_c_types_implementation.py: Added.
+        (add_whitespace_separator):
+        (ObjectiveCTypesImplementationGenerator):
+        (ObjectiveCTypesImplementationGenerator.__init__):
+        (ObjectiveCTypesImplementationGenerator.output_filename):
+        (ObjectiveCTypesImplementationGenerator.domains_to_generate):
+        (ObjectiveCTypesImplementationGenerator.generate_output):
+        (ObjectiveCTypesImplementationGenerator.generate_type_implementations):
+        (ObjectiveCTypesImplementationGenerator.generate_type_implementation):
+        (ObjectiveCTypesImplementationGenerator._generate_init_method_for_required_members):
+        (ObjectiveCTypesImplementationGenerator._generate_setter_for_member):
+        (ObjectiveCTypesImplementationGenerator._generate_getter_for_member):
+        * inspector/scripts/codegen/generate_protocol_types_header.py:
+        (ProtocolTypesHeaderGenerator._generate_forward_declarations):
+        (_generate_typedefs_for_domain):
+        (_generate_builders_for_domain):
+        * inspector/scripts/codegen/generator.py:
+        (Generator.wrap_with_guard_for_domain):
+        (Generator):
+        (Generator.wrap_with_guard):
+        * inspector/scripts/codegen/generator_templates.py:
+        (AlternateInspector):
+        (ObjCInspector):
+        * inspector/scripts/codegen/models.py:
+        (Framework.fromString):
+        (Frameworks):
+        * inspector/scripts/generate-inspector-protocol-bindings.py:
+        (generate_from_specification):
+        * inspector/scripts/tests/expected/commands-with-async-attribute.json-result:
+        * inspector/scripts/tests/expected/commands-with-optional-call-return-parameters.json-result:
+        * inspector/scripts/tests/expected/domains-with-varying-command-sizes.json-result:
+        * inspector/scripts/tests/expected/events-with-optional-parameters.json-result:
+        * inspector/scripts/tests/expected/generate-domains-with-feature-guards.json-result:
+        * inspector/scripts/tests/expected/same-type-id-different-domain.json-result:
+        * inspector/scripts/tests/expected/shadowed-optional-type-setters.json-result:
+        * inspector/scripts/tests/expected/type-declaration-aliased-primitive-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-array-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-enum-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-object-type.json-result:
+        * inspector/scripts/tests/expected/type-requiring-runtime-casts.json-result:
+
+2014-10-30  Andreas Kling  <akling@apple.com>
+
+        Unreviewed assertion fix.
+
+        RegExpCachedResult::m_reified is now the dedicated member that knows whether
+        the result was reified into an array or not. Check that instead of m_result
+        which is now single-purpose.
+
+        * runtime/RegExpCachedResult.cpp:
+        (JSC::RegExpCachedResult::setInput):
+
+2014-10-29  Andreas Kling  <akling@apple.com>
+
+        Use plain JSArray for RegExp matches instead of a lazily populated custom object.
+        <https://webkit.org/b/138191>
+
+        Reviewed by Geoffrey Garen.
+
+        We're already offering two RegExp matching APIs, one that collects subpattern
+        matches (exec), and one that simply tests for a match (test).
+        Given that, it was pretty overkill to lazily populate the resulting array of
+        matches, since the user could simply use test() if they didn't need them.
+
+        This allows the JIT to generate better code for RegExp match arrays, and also
+        enables some fast paths in the JSC runtime that check if an object isJSArray().
+
+        Looks like ~1.5% improvement on Octane/regexp according to run-jsc-benchmarks.
+
+        * jit/Repatch.cpp:
+        (JSC::tryCacheGetByID):
+        * runtime/JSArray.h:
+        (JSC::createArrayButterflyWithExactLength): Deleted.
+        * runtime/JSGlobalObject.cpp:
+        (JSC::JSGlobalObject::init):
+        * runtime/RegExpCachedResult.cpp:
+        (JSC::RegExpCachedResult::visitChildren):
+        (JSC::RegExpCachedResult::lastResult):
+        (JSC::RegExpCachedResult::leftContext):
+        (JSC::RegExpCachedResult::rightContext):
+        * runtime/RegExpCachedResult.h:
+        (JSC::RegExpCachedResult::RegExpCachedResult):
+        (JSC::RegExpCachedResult::record):
+        (JSC::RegExpCachedResult::input):
+        * runtime/RegExpConstructor.cpp:
+        (JSC::RegExpConstructor::getBackref):
+        (JSC::RegExpConstructor::getLastParen):
+        (JSC::RegExpConstructor::getLeftContext):
+        (JSC::RegExpConstructor::getRightContext):
+        * runtime/RegExpMatchesArray.cpp:
+        (JSC::createRegExpMatchesArray):
+        (JSC::RegExpMatchesArray::RegExpMatchesArray): Deleted.
+        (JSC::RegExpMatchesArray::create): Deleted.
+        (JSC::RegExpMatchesArray::finishCreation): Deleted.
+        (JSC::RegExpMatchesArray::visitChildren): Deleted.
+        (JSC::RegExpMatchesArray::reifyAllProperties): Deleted.
+        (JSC::RegExpMatchesArray::reifyMatchProperty): Deleted.
+        (JSC::RegExpMatchesArray::leftContext): Deleted.
+        (JSC::RegExpMatchesArray::rightContext): Deleted.
+        * runtime/RegExpMatchesArray.h:
+        (JSC::RegExpMatchesArray::createStructure): Deleted.
+        (JSC::RegExpMatchesArray::reifyAllPropertiesIfNecessary): Deleted.
+        (JSC::RegExpMatchesArray::reifyMatchPropertyIfNecessary): Deleted.
+        (JSC::RegExpMatchesArray::getOwnPropertySlot): Deleted.
+        (JSC::RegExpMatchesArray::getOwnPropertySlotByIndex): Deleted.
+        (JSC::RegExpMatchesArray::put): Deleted.
+        (JSC::RegExpMatchesArray::putByIndex): Deleted.
+        (JSC::RegExpMatchesArray::deleteProperty): Deleted.
+        (JSC::RegExpMatchesArray::deletePropertyByIndex): Deleted.
+        (JSC::RegExpMatchesArray::getOwnPropertyNames): Deleted.
+        (JSC::RegExpMatchesArray::defineOwnProperty): Deleted.
+        (JSC::isRegExpMatchesArray): Deleted.
+        * runtime/RegExpObject.cpp:
+        (JSC::RegExpObject::exec):
+        * runtime/StringPrototype.cpp:
+        (JSC::stringProtoFuncMatch):
+
+2014-10-29  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Fix Type Dependency Issues
+        https://bugs.webkit.org/show_bug.cgi?id=125664
+
+        Reviewed by Brian Burg.
+
+        Now that all JSON protocol files are processed together again
+        in r174892, we can remove the duplicated types which were only
+        needed when the domains were split.
+
+        * inspector/protocol/Console.json:
+        * inspector/protocol/Runtime.json:
+
+2014-10-28  Commit Queue  <commit-queue@webkit.org>
+
+        Unreviewed, rolling out r175249.
+        https://bugs.webkit.org/show_bug.cgi?id=138138
+
+        Appears to be failing some JS tests (Requested by mlam_ on
+        #webkit).
+
+        Reverted changeset:
+
+        "Holes are not copied properly when Arrays change shape to
+        ArrayStorage type."
+        https://bugs.webkit.org/show_bug.cgi?id=138118
+        http://trac.webkit.org/changeset/175249
+
+2014-10-27  Mark Lam  <mark.lam@apple.com>
+
+        Holes are not copied properly when Arrays change shape to ArrayStorage type.
+        <https://webkit.org/b/138118>
+
+        Reviewed by Mark Hahnenberg.
+
+        When we convert non-ArrayStorage typed arrays into ArrayStorage typed arrays,
+        we skipped the holes.  As a result, the slots in the ArrayStorage vector that
+        corresponds to those holes are uninitialize.  This is now fixed.
+
+        * runtime/JSObject.cpp:
+        (JSC::JSObject::convertUndecidedToArrayStorage):
+        (JSC::JSObject::convertInt32ToArrayStorage):
+        (JSC::JSObject::convertDoubleToArrayStorage):
+        (JSC::JSObject::convertContiguousToArrayStorage):
+
+2014-10-27  Mark Lam  <mark.lam@apple.com>
+
+        Crash when attempting to perform array iteration on a non-array with numeric keys not initialized.
+        <https://webkit.org/b/137814>
+
+        Reviewed by Geoffrey Garen.
+
+        The arrayIteratorNextThunkGenerator() thunk was not checking for the case where
+        the butterfly may be NULL.  This was the source of the crash, and is now fixed.
+
+        In addition, it is also not checking for the case where a property named "length"
+        may have been set on the iterated object.  The thunk only checks the butterfly's
+        publicLength for its iteration operation.  Array objects will work fine with this
+        because it always updates its butterfly's publicLength when its length changes.
+        In the case of iterable non-Array objects, the "length" property will require a
+        look up outside of the scope of this thunk.  The fix is simply to limit the fast
+        case checks in this thunk to Array objects.
+
+        * jit/ThunkGenerators.cpp:
+        (JSC::arrayIteratorNextThunkGenerator):
+
+2014-10-27  Mark Lam  <mark.lam@apple.com>
+
+        Simplified some JSObject methods for converting arrays to ArrayStorage shape.
+        <https://webkit.org/b/138119>
+
+        Reviewed by Filip Pizlo.
+
+        Currently, for each Undecided, Int32, Double, and Contiguous array shapes,
+        there are 3 JSObject methods to convert them to ArrayStorage shape:
+            ArrayStorage* convert<shape>ToArrayStorage(VM&, NonPropertyTransition, unsigned neededLength);
+            ArrayStorage* convert<shape>ToArrayStorage(VM&, NonPropertyTransition);
+            ArrayStorage* convert<shape>ToArrayStorage(VM&);
+
+        However, the neededLength that is passed is always m_butterfly->vectorLength().
+        Hence, the method that takes a neededLength is really not needed.  This patch
+        removes this unneeded verbosity.
+
+        * runtime/JSObject.cpp:
+        (JSC::JSObject::convertUndecidedToArrayStorage):
+        (JSC::JSObject::convertInt32ToArrayStorage):
+        - Also reordered the placement of the DeferGC statement so this Int32 function
+          will look more similar to the others.
+        (JSC::JSObject::convertDoubleToArrayStorage):
+        (JSC::JSObject::convertContiguousToArrayStorage):
+        * runtime/JSObject.h:
+
+2014-10-25  Brian J. Burg  <burg@cs.washington.edu>
+
+        Web Inspector: timelines should not count time elapsed while paused in the debugger
+        https://bugs.webkit.org/show_bug.cgi?id=136351
+
+        Unreviewed, follow-up fix after r175203. The debugger agent should not assume
+        that the inspector environment's stopwatch has already been started.
+
+        * inspector/agents/InspectorDebuggerAgent.cpp:
+        (Inspector::InspectorDebuggerAgent::didPause): Check if the stopwatch isActive() before stopping.
+
+2014-10-18  Brian J. Burg  <burg@cs.washington.edu>
+
+        Web Inspector: timelines should not count time elapsed while paused in the debugger
+        https://bugs.webkit.org/show_bug.cgi?id=136351
+
+        Reviewed by Timothy Hatcher.
+
+        Now that we have a stopwatch to provide pause-aware timing data, we can remove the
+        profiler's handling of debugger pause/continue callbacks. The debugger agent accounts
+        for suspended execution by pausing and resuming the stopwatch.
+
+        * API/JSProfilerPrivate.cpp:
+        (JSStartProfiling): Use a fresh stopwatch when profiling from the JSC API.
+        * inspector/InspectorEnvironment.h:
+        * inspector/JSGlobalObjectInspectorController.cpp:
+        (Inspector::JSGlobalObjectInspectorController::JSGlobalObjectInspectorController):
+        (Inspector::JSGlobalObjectInspectorController::executionStopwatch):
+        * inspector/JSGlobalObjectInspectorController.h:
+        * inspector/ScriptDebugServer.cpp:
+        (Inspector::ScriptDebugServer::handlePause):
+        * inspector/agents/InspectorDebuggerAgent.cpp:
+        (Inspector::InspectorDebuggerAgent::didPause):
+        (Inspector::InspectorDebuggerAgent::breakpointActionProbe):
+        (Inspector::InspectorDebuggerAgent::didContinue):
+        * inspector/agents/InspectorDebuggerAgent.h:
+        * profiler/LegacyProfiler.cpp:
+        (JSC::LegacyProfiler::profiler): Use nullptr.
+        (JSC::LegacyProfiler::startProfiling): Hand off a stopwatch to the profile generator.
+        (JSC::LegacyProfiler::stopProfiling): Use nullptr.
+        (JSC::LegacyProfiler::didPause): Deleted.
+        (JSC::LegacyProfiler::didContinue): Deleted.
+        * profiler/LegacyProfiler.h:
+        * profiler/Profile.cpp: The root node should always have a start time of 0.0.
+        (JSC::Profile::Profile):
+        * profiler/ProfileGenerator.cpp: Remove debugger pause/continue callbacks and the
+        timestamp member that was used to track time elapsed by the debugger. Just use the
+        stopwatch's elapsed times to generate start/elapsed times for function calls.
+
+        (JSC::ProfileGenerator::create):
+        (JSC::ProfileGenerator::ProfileGenerator):
+        (JSC::AddParentForConsoleStartFunctor::operator()): The parent node of |console.profile|
+        should have a start time of 0.0, since it represents the starting node of profiling.
+
+        (JSC::ProfileGenerator::beginCallEntry):
+        (JSC::ProfileGenerator::endCallEntry):
+        (JSC::ProfileGenerator::didPause): Deleted.
+        (JSC::ProfileGenerator::didContinue): Deleted.
+        * profiler/ProfileGenerator.h:
+
+2014-10-24  Mark Lam  <mark.lam@apple.com>
+
+        Simplified IndexingType's hasAnyArrayStorage().
+        <https://webkit.org/b/138051>
+
+        Reviewed by Michael Saboff.
+
+        IndexingType's hasAnyArrayStorage() currently does subtraction of ArrayStorageShape
+        with the purpose of making non-ArrayStorage types underflow (with that subtraction)
+        and have a result that exceeds SlowPutArrayStorageShape.  What it is doing is
+        basically checking for a shape value that is greater equal to ArrayStorageShape.
+        We can just simplify the code as such.
+
+        Also added a comment to describe the structure of the bits in IndexingType.
+
+        * runtime/IndexingType.h:
+        (JSC::hasAnyArrayStorage):
+
+2014-10-23  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Provide a way to have alternate inspector agents
+        https://bugs.webkit.org/show_bug.cgi?id=137901
+
+        Reviewed by Brian Burg.
+
+        Provide a way to use alternate inspector agents debugging a JSContext.
+        Expose a very slim private API that a client could use to know when
+        an inspector has connected/disconnected, and a way to register its
+        augmentative agents.
+
+        * Configurations/FeatureDefines.xcconfig:
+        * JavaScriptCore.xcodeproj/project.pbxproj:
+        New feature guard. New files.
+
+        * API/JSContextRef.cpp:
+        (JSGlobalContextGetAugmentableInspectorController):
+        * API/JSContextRefInspectorSupport.h: Added.
+        Access to the private interface from a JSContext.
+
+        * inspector/JSGlobalObjectInspectorController.cpp:
+        (Inspector::JSGlobalObjectInspectorController::JSGlobalObjectInspectorController):
+        (Inspector::JSGlobalObjectInspectorController::connectFrontend):
+        (Inspector::JSGlobalObjectInspectorController::disconnectFrontend):
+        * inspector/JSGlobalObjectInspectorController.h:
+        * inspector/augmentable/AugmentableInspectorController.h: Added.
+        (Inspector::AugmentableInspectorController::~AugmentableInspectorController):
+        (Inspector::AugmentableInspectorController::connected):
+        * inspector/augmentable/AugmentableInspectorControllerClient.h: Added.
+        (Inspector::AugmentableInspectorControllerClient::~AugmentableInspectorControllerClient):
+        * inspector/augmentable/AlternateDispatchableAgent.h: Added.
+        (Inspector::AlternateDispatchableAgent::AlternateDispatchableAgent):
+        Provide the private APIs a client could use to add alternate agents using alternate backend dispatchers.
+
+        * inspector/scripts/codegen/__init__.py:
+        * inspector/scripts/generate-inspector-protocol-bindings.py:
+        (generate_from_specification):
+        New includes, and use the new generator.
+        
+        * inspector/scripts/codegen/generate_alternate_backend_dispatcher_header.py: Added.
+        (AlternateBackendDispatcherHeaderGenerator):
+        (AlternateBackendDispatcherHeaderGenerator.__init__):
+        (AlternateBackendDispatcherHeaderGenerator.output_filename):
+        (AlternateBackendDispatcherHeaderGenerator.generate_output):
+        (AlternateBackendDispatcherHeaderGenerator._generate_handler_declarations_for_domain):
+        (AlternateBackendDispatcherHeaderGenerator._generate_handler_declaration_for_command):
+        Generate the abstract AlternateInspectorBackendDispatcher interfaces.
+
+        * inspector/scripts/codegen/generate_backend_dispatcher_header.py:
+        (BackendDispatcherHeaderGenerator.generate_output):
+        (BackendDispatcherHeaderGenerator._generate_alternate_handler_forward_declarations_for_domains):
+        (BackendDispatcherHeaderGenerator._generate_alternate_handler_forward_declarations_for_domains.AlternateInspector):
+        Forward declare alternate dispatchers, and allow setting an alternate dispatcher on a domain dispatcher.
+
+        * inspector/scripts/codegen/generate_backend_dispatcher_implementation.py:
+        (BackendDispatcherImplementationGenerator.generate_output):
+        (BackendDispatcherImplementationGenerator._generate_dispatcher_implementation_for_command):
+        Check for and dispatch on an AlternateInspectorBackendDispatcher if there is one for this domain.
+
+        * inspector/scripts/codegen/generator_templates.py:
+        (AlternateInspectorBackendDispatcher):
+        (AlternateInspector):
+        Template boilerplate for prelude and postlude.
+
+        * inspector/scripts/tests/expected/commands-with-async-attribute.json-result:
+        * inspector/scripts/tests/expected/commands-with-optional-call-return-parameters.json-result:
+        * inspector/scripts/tests/expected/domains-with-varying-command-sizes.json-result:
+        * inspector/scripts/tests/expected/events-with-optional-parameters.json-result:
+        * inspector/scripts/tests/expected/generate-domains-with-feature-guards.json-result:
+        * inspector/scripts/tests/expected/same-type-id-different-domain.json-result:
+        * inspector/scripts/tests/expected/shadowed-optional-type-setters.json-result:
+        * inspector/scripts/tests/expected/type-declaration-aliased-primitive-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-array-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-enum-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-object-type.json-result:
+        * inspector/scripts/tests/expected/type-requiring-runtime-casts.json-result:
+        Rebaseline tests.
+
+2014-10-23  Michael Saboff  <msaboff@apple.com>
+
+        offsets.rb:183:in `buildOffsetsMap': unhandled exception - is offlineasm dependency tracking broken? (132668)
+        https://bugs.webkit.org/show_bug.cgi?id=138017
+
+        Reviewed by Mark Lam.
+
+        Removed from the nput file $(SRCROOT)/llint/LowLevelAssembler.asm and output file
+        $(BUILT_PRODUCTS_DIR)/LLIntOffsets/LLIntDesiredOffsets.h from the Generate Derived Sources
+        build phase in the LLInt Offset target.  There is no need for Xcode to do any dependency
+        checking with these files as the ruby script offlineasm/generate_offset_extractor.rb will
+        do that for us.
+
+        * JavaScriptCore.xcodeproj/project.pbxproj:
+
+2014-10-23  Michael Saboff  <msaboff@apple.com>
+
+        Change CallFrame::lexicalGlobalObject() to use Callee instead of JSScope
+        https://bugs.webkit.org/show_bug.cgi?id=136901
+
+        Reviewed by Mark Lam.
+
+        Implement ExecState::lexicalGlobalObject() using Callee.
+        
+        * runtime/JSScope.h:
+        (JSC::ExecState::lexicalGlobalObject):
+
+2014-10-22  Milan Crha  <mcrha@redhat.com>
+
+        Prefix isnan() with std::.
+        <https://webkit.org/b/137966>.
+
+        Reviewed by Carlos Garcia Campos.
+
+        * profiler/ProfileNode.h:
+        (JSC::ProfileNode::Call::setStartTime):
+        (JSC::ProfileNode::Call::setElapsedTime):
+
+2014-10-22  Mark Lam  <mark.lam@apple.com>
+
+        Refactoring to simplify some code in DatePrototype.cpp.
+        <https://webkit.org/b/137997>
+
+        Reviewed by Filip Pizlo.
+
+        A bunch of functions in DatePrototype.cpp have the pattern of loading a
+        constant into a local variable only to pass it to a callee function
+        immediately after.  There is no other use for that variable.  This adds
+        additional verbosity with no added benefit.
+
+        This patch refactors those functions to just pass the constant arg directly.
+
+        * runtime/DatePrototype.cpp:
+        (JSC::dateProtoFuncSetMilliSeconds):
+        (JSC::dateProtoFuncSetUTCMilliseconds):
+        (JSC::dateProtoFuncSetSeconds):
+        (JSC::dateProtoFuncSetUTCSeconds):
+        (JSC::dateProtoFuncSetMinutes):
+        (JSC::dateProtoFuncSetUTCMinutes):
+        (JSC::dateProtoFuncSetHours):
+        (JSC::dateProtoFuncSetUTCHours):
+        (JSC::dateProtoFuncSetDate):
+        (JSC::dateProtoFuncSetUTCDate):
+        (JSC::dateProtoFuncSetMonth):
+        (JSC::dateProtoFuncSetUTCMonth):
+        (JSC::dateProtoFuncSetFullYear):
+        (JSC::dateProtoFuncSetUTCFullYear):
+
+2014-10-22  Byungseon Shin  <sun.shin@lge.com>
+
+        String(new Date(Mar 30 2014 01:00:00)) is wrong in CET
+        https://bugs.webkit.org/show_bug.cgi?id=130967
+
+        Reviewed by Mark Lam.
+
+        By definition of calculateLocalTimeOffset, input time should be UTC time.
+        But there are many cases when input time is based on local time.
+        So, it gives erroneous results while calculating offset of DST boundary time.
+        By adding a argument to distinguish UTC and local time, we can get the correct offset.
+
+        * JavaScriptCore.order:
+        * runtime/DateConstructor.cpp:
+        (JSC::constructDate):
+        (JSC::callDate):
+        (JSC::dateUTC):
+        * runtime/DateInstance.cpp:
+        (JSC::DateInstance::calculateGregorianDateTime):
+        (JSC::DateInstance::calculateGregorianDateTimeUTC):
+        * runtime/DatePrototype.cpp:
+        (JSC::setNewValueFromTimeArgs):
+        (JSC::setNewValueFromDateArgs):
+        (JSC::dateProtoFuncSetMilliSeconds):
+        (JSC::dateProtoFuncSetUTCMilliseconds):
+        (JSC::dateProtoFuncSetSeconds):
+        (JSC::dateProtoFuncSetUTCSeconds):
+        (JSC::dateProtoFuncSetMinutes):
+        (JSC::dateProtoFuncSetUTCMinutes):
+        (JSC::dateProtoFuncSetHours):
+        (JSC::dateProtoFuncSetUTCHours):
+        (JSC::dateProtoFuncSetDate):
+        (JSC::dateProtoFuncSetUTCDate):
+        (JSC::dateProtoFuncSetMonth):
+        (JSC::dateProtoFuncSetUTCMonth):
+        (JSC::dateProtoFuncSetFullYear):
+        (JSC::dateProtoFuncSetUTCFullYear):
+        (JSC::dateProtoFuncSetYear):
+        * runtime/JSDateMath.cpp:
+        (JSC::localTimeOffset):
+        (JSC::gregorianDateTimeToMS):
+        (JSC::msToGregorianDateTime):
+        (JSC::parseDateFromNullTerminatedCharacters):
+        * runtime/JSDateMath.h:
+        * runtime/VM.h:
+        (JSC::LocalTimeOffsetCache::LocalTimeOffsetCache):
+        (JSC::LocalTimeOffsetCache::reset):
+        Passing TimeType argument to distingush UTC time and local time.
+
+2014-10-22  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Fix generator importing of protocol type "any", treat as value
+        https://bugs.webkit.org/show_bug.cgi?id=137931
+
+        Reviewed by Timothy Hatcher.
+
+        Treat incoming "any" objects as InspectorValues, which can be any type.
+        Add the necessary boilerplate to import.
+
+        * inspector/InspectorBackendDispatcher.cpp:
+        (Inspector::AsMethodBridges::asValue):
+        (Inspector::InspectorBackendDispatcher::getValue):
+        * inspector/InspectorBackendDispatcher.h:
+        * inspector/scripts/codegen/generator.py:
+        (Generator.keyed_get_method_for_type):
+        * inspector/scripts/tests/expected/commands-with-optional-call-return-parameters.json-result:
+
+2014-10-22  Michael Saboff  <msaboff@apple.com>
+
+        REGRESSION(r174996): Broke C_LOOP
+        https://bugs.webkit.org/show_bug.cgi?id=137971
+
+        Reviewed by Mark Lam.
+
+        Removed incorrect move to cfr (CallFrameRegister) before we make the call to a native function.
+        After r174996, the source register for the move contained garbage causing the crash.  The move
+        to cfr before making the call to the native function is wrong and should have been removed
+        some time ago.  This brings the ARM64 / C_LOOP code path inline with the other CPU paths.
+        Tested on ARM64 as well as a C_LOOP build.
+
+        * llint/LowLevelInterpreter64.asm:
+
+2014-10-21  Mark Lam  <mark.lam@apple.com>
+
+        Remove erroneous canUseJIT() in the intrinsics version of JITThunks::hostFunctionStub().
+        <https://webkit.org/b/137937>
+
+        Reviewed by Michael Saboff.
+
+        This version of JITThunks::hostFunctionStub() can only be called from the intrinsics
+        version of VM::getHostFunction() which asserts canUseJIT().  Hence, we can eliminate
+        the canUseJIT() check in JITThunks::hostFunctionStub().  We don't handle the
+        !canUseJIT() case properly there anyway.
+
+        * jit/JITThunks.cpp:
+        (JSC::JITThunks::hostFunctionStub):
+
+2014-10-21  Michael Saboff  <msaboff@apple.com>
+
+        Add operator==(PropertyName, const char*)
+        https://bugs.webkit.org/show_bug.cgi?id=137925
+
+        Reviewed by Mark Lam.
+
+        * runtime/PropertyName.h:
+        (JSC::operator==): Added to simplify comparison with string literals.
+
+
+2014-10-21  Michael Saboff  <msaboff@apple.com>
+
+        Change native call frames to use the scope from their Callee instead of their caller's scope
+        https://bugs.webkit.org/show_bug.cgi?id=137907
+
+        Reviewed by Mark Lam.
+
+        Changed setting of scope for native CallFrames to use the scope associated with the
+        Callee instead of the caller's scope.
+
+        * jit/ThunkGenerators.cpp:
+        (JSC::nativeForGenerator):
+        * llint/LowLevelInterpreter32_64.asm:
+        * llint/LowLevelInterpreter64.asm:
+
+2014-10-21  Tibor Meszaros  <tmeszaros.u-szeged@partner.samsung.com>
+
+        Add missing ENABLE(FTL_NATIVE_CALL_INLINING) guard to BundlePath.cpp after r174940
+        https://bugs.webkit.org/show_bug.cgi?id=137924
+
+        Reviewed by Csaba Osztrogonác.
+
+        * runtime/BundlePath.cpp:
+
+2014-10-21  Dániel Bátyai  <dbatyai.u-szeged@partner.samsung.com>
+
+        Fix FTL Native Inlining for EFL
+        https://bugs.webkit.org/show_bug.cgi?id=137774
+
+        Reviewed by Michael Saboff.
+
+        Added required functionality for Native Inlining to EFL, and fixed a bug/typo in the original code,
+        which caused incorrect memory allocation.
+
+        * CMakeLists.txt:
+        * create-llvm-ir-from-source-file.py: Added.
+        * create-symbol-table-index.py: Added.
+        * ftl/FTLLowerDFGToLLVM.cpp:
+        (JSC::FTL::LowerDFGToLLVM::lower):
+        (JSC::FTL::LowerDFGToLLVM::getModuleByPathForSymbol):
+        (JSC::FTL::LowerDFGToLLVM::exitValueForAvailability):
+        (JSC::FTL::LowerDFGToLLVM::exitValueForNode):
+        * runtime/BundlePath.cpp: Added.
+        (JSC::bundlePath):
+        * runtime/JSDataViewPrototype.cpp:
+        (JSC::getData):
+        (JSC::setData):
+        * runtime/MathObject.cpp:
+
+2014-10-21  Milan Crha  <mcrha@redhat.com>
+
+        Move JSC::MacroAssemblerX86Common::s_sse2CheckState definition to MacroAssemblerX86Common.cpp.
+        <https://webkit.org/b/137807>
+
+        Reviewed by Csaba Osztrogonác.
+
+        * assembler/MacroAssemblerX86Common.cpp:
+        * jit/JIT.cpp:
+
+2014-10-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Unreviewed add back copyright line that was accidentally removed.
+
+        * inspector/scripts/codegen/generator_templates.py:
+        (GeneratorTemplates):
+
+2014-10-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: InspectorBackendCommands should include when to activate particular domains
+        https://bugs.webkit.org/show_bug.cgi?id=137753
+
+        Reviewed by Timothy Hatcher.
+
+        Add an availability property to domains that only activate for
+        particular debuggable types. If missing, the domain is always
+        activated. Otherwise it must be a debuggable type string.
+        When a frontend is opened for that debuggable type, the domain
+        will be activated.
+
+        * inspector/scripts/codegen/models.py:
+        (Protocol.parse_domain):
+        (Domain.__init__):
+        (Domains):
+        Parse and validate the Domain's "availability" property.
+
+        * inspector/scripts/codegen/generate_backend_commands.py:
+        (BackendCommandsGenerator.generate_domain):
+        Emit InspectorBackend.activateDomain with debuggable type filter.
+
+        * inspector/protocol/ApplicationCache.json:
+        * inspector/protocol/CSS.json:
+        * inspector/protocol/DOM.json:
+        * inspector/protocol/DOMDebugger.json:
+        * inspector/protocol/DOMStorage.json:
+        * inspector/protocol/Database.json:
+        * inspector/protocol/IndexedDB.json:
+        * inspector/protocol/LayerTree.json:
+        * inspector/protocol/Network.json:
+        * inspector/protocol/Page.json:
+        * inspector/protocol/Replay.json:
+        * inspector/protocol/Timeline.json:
+        * inspector/protocol/Worker.json:
+        These domains only activate for Web debuggables.
+
+        * inspector/scripts/tests/expected/commands-with-async-attribute.json-result:
+        * inspector/scripts/tests/expected/commands-with-optional-call-return-parameters.json-result:
+        * inspector/scripts/tests/expected/domains-with-varying-command-sizes.json-result:
+        * inspector/scripts/tests/expected/events-with-optional-parameters.json-result:
+        * inspector/scripts/tests/expected/generate-domains-with-feature-guards.json-result:
+        Update existing tests that now have activate output.
+
+        * inspector/scripts/tests/expected/fail-on-domain-availability.json-error: Added.
+        * inspector/scripts/tests/fail-on-domain-availability.json: Added.
+        Add a test for "availability" validation.
+
+2014-10-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+        [Win] Build fix for generated inspector files.
+
+        Rubberstamped by Brent Fulgham.
+
+        * inspector/scripts/codegen/generate_backend_dispatcher_header.py:
+        (BackendDispatcherHeaderGenerator._generate_async_handler_declaration_for_command):
+        * inspector/scripts/codegen/generator_templates.py:
+        (GeneratorTemplates):
+
+2014-10-20  Brent Fulgham  <bfulgham@apple.com>
+
+        [Win] Unreviewed build fix.
+
+        We need to (1) pass the 'windows' argument to our script for checking feature definitions,
+        and (2) we must use Cwd::realpath on our path input arguments to avoid Cygwin and Windows
+        getting confused about path separators versus escape characters.
+
+
+        * JavaScriptCore.vcxproj/build-generated-files.pl:
+
+2014-10-20  Mark Lam  <mark.lam@apple.com>
+
+        [Follow up] Web Process crash when starting the web inspector after r174025.
+        <https://webkit.org/b/137340>
+
+        Reviewed by Geoffrey Garen.
+
+        Applied Geoff's feedback to clean up some code for better clarity after
+        r174856.
+
+        * dfg/DFGFixupPhase.cpp:
+        (JSC::DFG::FixupPhase::insertCheck):
+        * dfg/DFGInsertionSet.h:
+        (JSC::DFG::InsertionSet::insertOutOfOrder):
+
+2014-10-20  Mark Lam  <mark.lam@apple.com>
+
+        Factor out JITCode::typeName() for debugging use.
+        <https://webkit.org/b/137888>
+
+        Reviewed by Geoffrey Garen.
+
+        JITCode's printInternal() currently decodes the JITType into a string and
+        prints it.  This change factors out the part that decodes the JITType into
+        JITCode::typeName() so that we can call it from lldb while debugging to
+        quickly decode a JITType value.
+
+        * jit/JITCode.cpp:
+        (JSC::JITCode::typeName):
+        (WTF::printInternal):
+        * jit/JITCode.h:
+
+2014-10-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Unreviewed Windows Build Fix #2 after r174892.
+
+        * JavaScriptCore.vcxproj/build-generated-files.pl:
+        Define FEATURE_DEFINES for JavaScriptCore's DerivedSources.make.
+        This uses the same technique as WebCore.
+
+2014-10-20  Mark Lam  <mark.lam@apple.com>
+
+        Fix placement of a few items in vcxproj ItemGroups.
+        <https://webkit.org/b/137886>
+
+        Reviewed by Geoffrey Garen.
+
+        https://webkit.org/b/137873 is likely a cut-and-paste error that manifested
+        because we had ClCompile and ClInclude entries mixed up in the wrong ItemGroups.
+        We should fix these so that ClCompile entries are in the ClCompile ItemGroup,
+        and ClInclude entries in the ClInclude ItemGroup.  This will help reduce the
+        chance of future cut-and-paste errors of this nature.
+
+        * JavaScriptCore.vcxproj/JavaScriptCore.vcxproj:
+        * JavaScriptCore.vcxproj/JavaScriptCore.vcxproj.filters:
+
+2014-10-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Unreviewed Windows Build Fix after r174892.
+
+        * JavaScriptCore.vcxproj/JavaScriptCore.vcxproj:
+        Update file name to the new generated file name.
+
+2014-10-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Rename generated Inspector.json to CombinedDomains.json to prevent name collisions
+        https://bugs.webkit.org/show_bug.cgi?id=137825
+
+        Reviewed by Timothy Hatcher.
+
+        * CMakeLists.txt:
+        * DerivedSources.make:
+        * JavaScriptCore.vcxproj/copy-files.cmd:
+        * JavaScriptCore.xcodeproj/project.pbxproj:
+        * inspector/protocol/Inspector.json: Renamed from Source/JavaScriptCore/inspector/protocol/InspectorDomain.json.
+
+2014-10-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Generate all Inspector domains together in JavaScriptCore
+        https://bugs.webkit.org/show_bug.cgi?id=137748
+
+        Reviewed by Brian Burg.
+
+        * inspector/protocol/ApplicationCache.json: Renamed from Source/WebCore/inspector/protocol/ApplicationCache.json.
+        * inspector/protocol/CSS.json: Renamed from Source/WebCore/inspector/protocol/CSS.json.
+        * inspector/protocol/DOM.json: Renamed from Source/WebCore/inspector/protocol/DOM.json.
+        * inspector/protocol/DOMDebugger.json: Renamed from Source/WebCore/inspector/protocol/DOMDebugger.json.
+        * inspector/protocol/DOMStorage.json: Renamed from Source/WebCore/inspector/protocol/DOMStorage.json.
+        * inspector/protocol/Database.json: Renamed from Source/WebCore/inspector/protocol/Database.json.
+        * inspector/protocol/IndexedDB.json: Renamed from Source/WebCore/inspector/protocol/IndexedDB.json.
+        * inspector/protocol/LayerTree.json: Renamed from Source/WebCore/inspector/protocol/LayerTree.json.
+        * inspector/protocol/Network.json: Renamed from Source/WebCore/inspector/protocol/Network.json.
+        * inspector/protocol/Page.json: Renamed from Source/WebCore/inspector/protocol/Page.json.
+        * inspector/protocol/Replay.json: Renamed from Source/WebCore/inspector/protocol/Replay.json.
+        * inspector/protocol/Timeline.json: Renamed from Source/WebCore/inspector/protocol/Timeline.json.
+        * inspector/protocol/Worker.json: Renamed from Source/WebCore/inspector/protocol/Worker.json.
+        Move all protocol files into this directory.
+
+        * inspector/InspectorProtocolTypesBase.h: Renamed from Source/JavaScriptCore/inspector/InspectorProtocolTypes.h.
+        Renamed the base types file to not clash with the generated types file.
+
+        * CMakeLists.txt:
+        * DerivedSources.make:
+        * JavaScriptCore.vcxproj/JavaScriptCore.vcxproj:
+        * JavaScriptCore.vcxproj/JavaScriptCore.vcxproj.filters:
+        * JavaScriptCore.vcxproj/copy-files.cmd:
+        * JavaScriptCore.xcodeproj/project.pbxproj:
+        Update build phases for new JSON files and new filenames.
+
+        * inspector/scripts/tests/expected/commands-with-async-attribute.json-result:
+        * inspector/scripts/tests/expected/commands-with-optional-call-return-parameters.json-result:
+        * inspector/scripts/tests/expected/domains-with-varying-command-sizes.json-result:
+        * inspector/scripts/tests/expected/events-with-optional-parameters.json-result:
+        * inspector/scripts/tests/expected/generate-domains-with-feature-guards.json-result:
+        * inspector/scripts/tests/expected/same-type-id-different-domain.json-result:
+        * inspector/scripts/tests/expected/shadowed-optional-type-setters.json-result:
+        * inspector/scripts/tests/expected/type-declaration-aliased-primitive-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-array-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-enum-type.json-result:
+        * inspector/scripts/tests/expected/type-declaration-object-type.json-result:
+        * inspector/scripts/tests/expected/type-requiring-runtime-casts.json-result:
+        Updated names of things now that prefixes are no longer needed.
+
+        * inspector/ConsoleMessage.h:
+        * inspector/ContentSearchUtilities.cpp:
+        * inspector/ContentSearchUtilities.h:
+        * inspector/InjectedScript.h:
+        * inspector/InjectedScriptBase.h:
+        * inspector/ScriptCallFrame.h:
+        * inspector/ScriptCallStack.h:
+        * inspector/agents/InspectorAgent.h:
+        * inspector/agents/InspectorConsoleAgent.h:
+        * inspector/agents/InspectorDebuggerAgent.cpp:
+        (Inspector::breakpointActionTypeForString):
+        * inspector/agents/InspectorDebuggerAgent.h:
+        * inspector/agents/InspectorRuntimeAgent.h:
+        * runtime/TypeProfiler.cpp:
+        * runtime/TypeSet.cpp:
+        Update includes and update a few function names that are generated.
+
+        * inspector/scripts/codegen/generate_protocol_types_header.py:
+        (ProtocolTypesHeaderGenerator.output_filename):
+        (ProtocolTypesHeaderGenerator.generate_output):
+        Include an export macro for type string constants defined in the implementation file.
+
+        * inspector/scripts/codegen/generate_backend_commands.py:
+        (BackendCommandsGenerator.output_filename):
+        * inspector/scripts/codegen/generate_backend_dispatcher_header.py:
+        (BackendDispatcherHeaderGenerator.output_filename):
+        (BackendDispatcherHeaderGenerator.generate_output):
+        * inspector/scripts/codegen/generate_backend_dispatcher_implementation.py:
+        (BackendDispatcherImplementationGenerator.output_filename):
+        (BackendDispatcherImplementationGenerator.generate_output):
+        (BackendDispatcherImplementationGenerator._generate_async_dispatcher_class_for_domain):
+        (BackendDispatcherImplementationGenerator._generate_dispatcher_implementation_for_command):
+        * inspector/scripts/codegen/generate_frontend_dispatcher_header.py:
+        (FrontendDispatcherHeaderGenerator.output_filename):
+        (FrontendDispatcherHeaderGenerator.generate_output):
+        * inspector/scripts/codegen/generate_frontend_dispatcher_implementation.py:
+        (FrontendDispatcherImplementationGenerator.output_filename):
+        (FrontendDispatcherImplementationGenerator.generate_output):
+        (FrontendDispatcherImplementationGenerator._generate_dispatcher_implementation_for_event):
+        (_generate_class_for_object_declaration):
+        (_generate_builder_setter_for_member):
+        (_generate_unchecked_setter_for_member):
+        * inspector/scripts/codegen/generate_protocol_types_implementation.py:
+        (ProtocolTypesImplementationGenerator.output_filename):
+        (ProtocolTypesImplementationGenerator.generate_output):
+        (ProtocolTypesImplementationGenerator._generate_enum_mapping):
+        * inspector/scripts/codegen/models.py:
+        (Framework.fromString):
+        (Frameworks):
+        * inspector/scripts/generate-inspector-protocol-bindings.py:
+        Simplify generator now that prefixes are no longer needed. This updates
+        filenames, includes, and the list of supported directories.
+
+2014-10-20  Csaba Osztrogonác  <ossy@webkit.org>
+
+        Remove obsolete comments after r99798
+        https://bugs.webkit.org/show_bug.cgi?id=137871
+
+        Reviewed by Darin Adler.
+
+        r99798 removed the comment in MacroAssemblerARMv7::supportsFloatingPointTruncate(),
+        so we should remove the stale references to this removed comment.
+
+        * assembler/MacroAssemblerX86.h:
+        * assembler/MacroAssemblerX86_64.h:
+
+2014-10-20  Csaba Osztrogonác  <ossy@webkit.org>
+
+        MacroAssemblerX86Common.cpp should be built on Windows too
+        https://bugs.webkit.org/show_bug.cgi?id=137873
+
+        Reviewed by Brent Fulgham.
+
+        * JavaScriptCore.vcxproj/JavaScriptCore.vcxproj:
+        * JavaScriptCore.vcxproj/JavaScriptCore.vcxproj.filters:
+
+2014-10-20  Csaba Osztrogonác  <ossy@webkit.org>
+
+        [cmake] Remove duplicated source files
+        https://bugs.webkit.org/show_bug.cgi?id=137875
+
+        Reviewed by Gyuyoung Kim.
+
+        * CMakeLists.txt:
+
+2014-10-18  Brian J. Burg  <burg@cs.washington.edu>
+
+        Web Replay: code generator shouldn't complain about enums without a storage type if they are in an enclosing scope
+        https://bugs.webkit.org/show_bug.cgi?id=137084
+
+        Reviewed by Joseph Pecoraro.
+
+        In order to generate encode/decode method declarations without pulling in lots of headers,
+        the generator must forward declare enums (for enum classes or enums with explicit sizes).
+
+        Change the generator to not require an explicit size if an enum is declared inside a struct
+        or class definition. In that case, it must pull in headers since scoped enums can't be
+        forward declared.
+
+        This patch also fixes some chained if-statements that should be if-else statements.
+
+        Test: updated replay/scripts/tests/generate-enum-encoding-helpers.json to cover the new case.
+
+        * replay/scripts/CodeGeneratorReplayInputs.py:
+        (InputsModel.parse_type_with_framework_name.is):
+        (InputsModel.parse_type_with_framework_name.is.must):
+        (Generator.generate_enum_trait_implementation):
+        (InputsModel.parse_type_with_framework_name): Deleted.
+        * replay/scripts/CodeGeneratorReplayInputsTemplates.py:
+        * replay/scripts/tests/expected/fail-on-c-style-enum-no-storage.json-error:
+        * replay/scripts/tests/expected/generate-enum-encoding-helpers-with-guarded-values.json-TestReplayInputs.cpp:
+        (JSC::EncodingTraits<WebCore::MouseButton>::decodeValue):
+        * replay/scripts/tests/expected/generate-enum-encoding-helpers.json-TestReplayInputs.cpp:
+        (JSC::EncodingTraits<WebCore::MouseButton>::decodeValue):
+        (JSC::EncodingTraits<WebCore::PlatformEvent::Type>::encodeValue):
+        (JSC::EncodingTraits<WebCore::PlatformEvent::Type>::decodeValue):
+        * replay/scripts/tests/expected/generate-enum-encoding-helpers.json-TestReplayInputs.h:
+        * replay/scripts/tests/expected/generate-enums-with-same-base-name.json-TestReplayInputs.cpp:
+        (JSC::EncodingTraits<WebCore::FormData1::Type>::decodeValue):
+        (JSC::EncodingTraits<PlatformEvent1::Type>::decodeValue):
+        * replay/scripts/tests/generate-enum-encoding-helpers.json: Added a new input to cover this case.
+
+2014-10-17  Mark Lam  <mark.lam@apple.com>
+
+        Web Process crash when starting the web inspector after r174025.
+        <https://webkit.org/b/137340>
+
+        Reviewed by Filip Pizlo.
+
+        After r174025, we can generate a bad graph in the DFG fixup phase like so:
+
+            102:<!0:-> StoreBarrier(Check:KnownCell:@19, ..., bc#44)
+            60:<!0:->  PutStructure(Check:KnownCell:@19, ..., bc#44)
+            103:<!0:-> Check(Check:NotCell:@54, ..., bc#44)
+                    // ^-- PutByOffset's StoreBarrier has been elided and replaced
+                    //     with a speculation check which can OSR exit.
+            61:<!0:->  PutByOffset(Check:KnownCell:@19, ..., bc#44)
+
+        As a result, the structure change will get executed even if we end up OSR
+        exiting before the PutByOffset.  In the baseline JIT code, the structure now
+        erroneously tells the put operation that there is a value in that property
+        slot when it is actually uninitialized (hence, the crash).
+
+        The fix is to insert the Check at the earliest point possible:
+
+        1. If the checked node is in the same bytecode as the PutByOffset, then
+           the earliest point where we can insert the Check is right after the
+           checked node.
+
+        2. If the checked node is from a preceding bytecode (before the PutByOffset),
+           then the earliest point where we can insert the Check is at the start
+           of the current bytecode.
+
+        Also reverted the workaround from r174749: https://webkit.org/b/137758.
+
+        Benchmark results appear to be a wash on aggregate.
+
+        * dfg/DFGFixupPhase.cpp:
+        (JSC::DFG::FixupPhase::indexOfNode):
+        (JSC::DFG::FixupPhase::indexOfFirstNodeOfExitOrigin):
+        (JSC::DFG::FixupPhase::fixupNode):
+        (JSC::DFG::FixupPhase::insertCheck):
+        * dfg/DFGInsertionSet.h:
+        (JSC::DFG::InsertionSet::insertOutOfOrder):
+        (JSC::DFG::InsertionSet::insertOutOfOrderNode):
+
+2014-10-10  Oliver Hunt  <oliver@apple.com>
+
+        Various arguments optimisations in codegen fail to account for arguments being in lexical record
+        https://bugs.webkit.org/show_bug.cgi?id=137617
+
+        Reviewed by Michael Saboff.
+
+        Rework the way we track |arguments| references so that we don't try
+        to use the |arguments| reference on the stack if it's not safe.
+
+        To do this without nuking performance it was necessary to update
+        the parser to track modification of the |arguments| reference
+        itself.
+
+        * bytecode/CodeBlock.cpp:
+        * bytecompiler/BytecodeGenerator.cpp:
+        (JSC::BytecodeGenerator::BytecodeGenerator):
+        (JSC::BytecodeGenerator::willResolveToArguments):
+        (JSC::BytecodeGenerator::uncheckedLocalArgumentsRegister):
+        (JSC::BytecodeGenerator::emitCall):
+        (JSC::BytecodeGenerator::emitConstruct):
+        (JSC::BytecodeGenerator::emitEnumeration):
+        (JSC::BytecodeGenerator::uncheckedRegisterForArguments): Deleted.
+        * bytecompiler/BytecodeGenerator.h:
+        (JSC::BytecodeGenerator::hasSafeLocalArgumentsRegister):
+        * bytecompiler/NodesCodegen.cpp:
+        (JSC::BracketAccessorNode::emitBytecode):
+        (JSC::DotAccessorNode::emitBytecode):
+        (JSC::getArgumentByVal):
+        (JSC::CallFunctionCallDotNode::emitBytecode):
+        (JSC::ApplyFunctionCallDotNode::emitBytecode):
+        (JSC::ArrayPatternNode::emitDirectBinding):
+        * interpreter/StackVisitor.cpp:
+        (JSC::StackVisitor::Frame::existingArguments):
+        * parser/Nodes.h:
+        (JSC::ScopeNode::modifiesArguments):
+        * parser/Parser.cpp:
+        (JSC::Parser<LexerType>::parseInner):
+        * parser/Parser.h:
+        (JSC::Scope::getCapturedVariables):
+        * parser/ParserModes.h:
+
+2014-10-17  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Use WTF::move() instead of std::move() to help ensure move semantics in JavaScriptCore
+        https://bugs.webkit.org/show_bug.cgi?id=137809
+
+        Reviewed by Csaba Osztrogonác.
+
+        Substitution of WTF::move() for std::move(). Clean up std::move() in JavaScriptCore.
+
+        * bytecode/GetByIdStatus.cpp:
+        (JSC::GetByIdStatus::computeForStubInfo):
+        * bytecode/PutByIdStatus.cpp:
+        (JSC::PutByIdStatus::computeForStubInfo):
+        * bytecode/PutByIdVariant.cpp:
+        (JSC::PutByIdVariant::setter):
+
+2014-10-15  Oliver Hunt  <oliver@apple.com>
+
+        Use a single allocation for the Arguments object
+        https://bugs.webkit.org/show_bug.cgi?id=137751
+
+        Reviewed by Filip Pizlo.
+
+        This patch removes the secondary allocation for parameters in the Arguments
+        object.  This is faily simple, but we needed to make it possible for the JIT
+        to allocate a variable GC object.  To do this i've added a new 
+        emitAllocateVariableSizedJSObject function to the JIT that does the work to
+        find the correct heap for a variable sized allocation and then bump that
+        allocator.
+
+        * dfg/DFGSpeculativeJIT.cpp:
+        (JSC::DFG::SpeculativeJIT::emitAllocateArguments):
+        * dfg/DFGSpeculativeJIT.h:
+        (JSC::DFG::SpeculativeJIT::emitAllocateVariableSizedJSObject):
+        * heap/CopyToken.h:
+        * heap/Heap.h:
+        (JSC::Heap::subspaceForObjectWithoutDestructor):
+        (JSC::Heap::subspaceForObjectNormalDestructor):
+        (JSC::Heap::subspaceForObjectsWithImmortalStructure):
+        * heap/MarkedSpace.h:
+        (JSC::MarkedSpace::subspaceForObjectsWithNormalDestructor):
+        (JSC::MarkedSpace::subspaceForObjectsWithImmortalStructure):
+        (JSC::MarkedSpace::subspaceForObjectsWithoutDestructor):
+        * interpreter/StackVisitor.cpp:
+        (JSC::StackVisitor::Frame::createArguments):
+        * runtime/Arguments.cpp:
+        (JSC::Arguments::visitChildren):
+        (JSC::Arguments::copyBackingStore):
+        (JSC::Arguments::tearOff):
+        (JSC::Arguments::allocateRegisterArray): Deleted.
+        * runtime/Arguments.h:
+        (JSC::Arguments::create):
+        (JSC::Arguments::isTornOff):
+        (JSC::Arguments::offsetOfRegisterArray):
+        (JSC::Arguments::registerArraySizeInBytes):
+        (JSC::Arguments::registerArray):
+        (JSC::Arguments::allocationSize): Deleted.
+
+2014-10-15  Filip Pizlo  <fpizlo@apple.com>
+
+        Apparently we've had a hole in arguments capture all along
+        https://bugs.webkit.org/show_bug.cgi?id=137767
+
+        Reviewed by Oliver Hunt.
+
+        * dfg/DFGByteCodeParser.cpp:
+        (JSC::DFG::ByteCodeParser::getArgument):
+        * tests/stress/arguments-captured.js: Added.
+        (foo):
+        (bar):
+
+2014-10-16  Saam Barati  <saambarati1@gmail.com>
+
+        Have the ProfileType node in the DFG convert to a structure check where it can
+        https://bugs.webkit.org/show_bug.cgi?id=137596
+
+        Reviewed by Filip Pizlo.
+
+        TypeSet now keeps track of the live set of Structures it has seen.
+        It no longer nukes everything during GC. It now only removes unmarked
+        structures during GC. This modification allows the ProfileType node 
+        to convert into a CheckStructure node safely in the DFG. 
+
+        This change brings up the conversion rate from ProfileType to Check 
+        or CheckStructrue from ~45% to ~65%. This change also speeds the 
+        type profiler up significantly: consistently between 2x-20x faster. 
+
+        This patch also does some slight refactoring: a few type profiler
+        related fields are moved from VM to TypeProfiler.
+
+        * bytecode/CodeBlock.cpp:
+        (JSC::CodeBlock::CodeBlock):
+        * dfg/DFGFixupPhase.cpp:
+        (JSC::DFG::FixupPhase::fixupNode):
+        * dfg/DFGNode.h:
+        (JSC::DFG::Node::convertToCheckStructure):
+        * heap/Heap.cpp:
+        (JSC::Heap::collect):
+        * runtime/SymbolTable.cpp:
+        (JSC::SymbolTable::uniqueIDForVariable):
+        * runtime/SymbolTable.h:
+        * runtime/TypeLocationCache.cpp:
+        (JSC::TypeLocationCache::getTypeLocation):
+        * runtime/TypeProfiler.cpp:
+        (JSC::TypeProfiler::TypeProfiler):
+        (JSC::TypeProfiler::nextTypeLocation):
+        (JSC::TypeProfiler::invalidateTypeSetCache):
+        (JSC::TypeProfiler::dumpTypeProfilerData):
+        * runtime/TypeProfiler.h:
+        (JSC::TypeProfiler::getNextUniqueVariableID):
+        * runtime/TypeProfilerLog.cpp:
+        (JSC::TypeProfilerLog::processLogEntries):
+        * runtime/TypeSet.cpp:
+        (JSC::TypeSet::addTypeInformation):
+        (JSC::TypeSet::invalidateCache):
+        * runtime/TypeSet.h:
+        (JSC::TypeSet::structureSet):
+        * runtime/VM.cpp:
+        (JSC::VM::VM):
+        (JSC::VM::enableTypeProfiler):
+        (JSC::VM::disableTypeProfiler):
+        (JSC::VM::dumpTypeProfilerData):
+        (JSC::VM::nextTypeLocation): Deleted.
+        (JSC::VM::invalidateTypeSetCache): Deleted.
+        * runtime/VM.h:
+        (JSC::VM::typeProfiler):
+        (JSC::VM::getNextUniqueVariableID): Deleted.
+        * tests/typeProfiler/dfg-jit-optimizations.js:
+
+2014-10-16  Adrien Destugues  <pulkomandy@gmail.com>
+
+        Use isnan from std namespace in ProfileGenerator.cpp
+        https://bugs.webkit.org/show_bug.cgi?id=137653
+
+        Reviewed by Darin Adler.
+
+        The C++ isnan() function is in the std namespace. The unprefixed isnan
+        may be available because of C99 headers leakage in C++, but should not
+        be used.
+
+        No new tests: no functional change, build fix on platforms which don't
+        export C99 functions in C++.
+
+        * profiler/ProfileGenerator.cpp:
+        (JSC::ProfileGenerator::beginCallEntry):
+        (JSC::ProfileGenerator::endCallEntry):
+        (JSC::ProfileGenerator::didPause):
+        (JSC::ProfileGenerator::didContinue):
+
+2014-10-15  Michael Saboff  <msaboff@apple.com>
+
+        REGRESSION(r174025): remote inspector crashes frequently when executing inspector frontend's JavaScript
+        https://bugs.webkit.org/show_bug.cgi?id=137758
+
+        Rubber stamped by Filip Pizlo.
+
+        Reverted r174025 for just PutByOffset Nodes.
+
+        * dfg/DFGFixupPhase.cpp:
+        (JSC::DFG::FixupPhase::fixupNode):
+
+2014-10-14  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Clean up unnecessary PassOwnPtr.h inclusion
+        https://bugs.webkit.org/show_bug.cgi?id=137726
+
+        Reviewed by Chris Dumez.
+
+        * API/JSCallbackObject.h: Remove PassOwnPtr.h inclusion.
+        * bytecode/DFGExitProfile.cpp: ditto.
+
+2014-10-14  Brent Fulgham  <bfulgham@apple.com>
+
+        [Win] Unreviewed gardening. Ignore Visual Studio *.sdf files.
+
+        * JavaScriptCore.vcxproj: Modified properties svn:ignore and svn:ignore.
+        * JavaScriptCore.vcxproj/jsc: Modified property svn:ignore.
+
+2014-10-14  Matthew Mirman  <mmirman@apple.com>
+
+        Removes references to LLVMJIT which is no longer part of LLVM
+        https://bugs.webkit.org/show_bug.cgi?id=137708
+
+        Reviewed by Filip Pizlo.
+
+        * Configurations/LLVMForJSC.xcconfig: removed -lLLVMJIT
+        * llvm/LLVMAPIFunctions.h: removed LinkInJIT
+
+2014-10-14  peavo@outlook.com  <peavo@outlook.com>
+
+        [Win32] Thunk is not implemented.
+        https://bugs.webkit.org/show_bug.cgi?id=137691
+
+        Reviewed by Mark Lam.
+
+        Thunks for functions with double operands (floor, etc.) are not implemented on Win32.
+
+        * jit/ThunkGenerators.cpp:
+
+2014-10-12  Alexey Proskuryakov  <ap@apple.com>
+
+        Adding svn:ignore so that .pyc files don't show up as new.
+
+        * inspector/scripts/codegen: Added property svn:ignore.
+
+2014-10-10  Commit Queue  <commit-queue@webkit.org>
+
+        Unreviewed, rolling out r174606.
+        https://bugs.webkit.org/show_bug.cgi?id=137621
+
+        broke a JSC test (Requested by estes on #webkit).
+
+        Reverted changeset:
+
+        "Various arguments optimisations in codegen fail to account
+        for arguments being in lexical record"
+        https://bugs.webkit.org/show_bug.cgi?id=137617
+        http://trac.webkit.org/changeset/174606
+
+2014-10-10  Oliver Hunt  <oliver@apple.com>
+
+        Various arguments optimisations in codegen fail to account for arguments being in lexical record
+        https://bugs.webkit.org/show_bug.cgi?id=137617
+
+        Reviewed by Michael Saboff.
+
+        Rework the way we track |arguments| references so that we don't try
+        to use the |arguments| reference on the stack if it's not safe.
+
+        To do this without nuking performance it was necessary to update
+        the parser to track modification of the |arguments| reference
+        itself.
+
+        * bytecode/CodeBlock.cpp:
+        * bytecompiler/BytecodeGenerator.cpp:
+        (JSC::BytecodeGenerator::BytecodeGenerator):
+        (JSC::BytecodeGenerator::willResolveToArguments):
+        (JSC::BytecodeGenerator::uncheckedLocalArgumentsRegister):
+        (JSC::BytecodeGenerator::emitCall):
+        (JSC::BytecodeGenerator::emitConstruct):
+        (JSC::BytecodeGenerator::emitEnumeration):
+        (JSC::BytecodeGenerator::uncheckedRegisterForArguments): Deleted.
+        * bytecompiler/BytecodeGenerator.h:
+        (JSC::BytecodeGenerator::hasSafeLocalArgumentsRegister):
+        * bytecompiler/NodesCodegen.cpp:
+        (JSC::BracketAccessorNode::emitBytecode):
+        (JSC::DotAccessorNode::emitBytecode):
+        (JSC::getArgumentByVal):
+        (JSC::CallFunctionCallDotNode::emitBytecode):
+        (JSC::ApplyFunctionCallDotNode::emitBytecode):
+        (JSC::ArrayPatternNode::emitDirectBinding):
+        * interpreter/StackVisitor.cpp:
+        (JSC::StackVisitor::Frame::existingArguments):
+        * parser/Nodes.h:
+        (JSC::ScopeNode::modifiesArguments):
+        * parser/Parser.cpp:
+        (JSC::Parser<LexerType>::parseInner):
+        * parser/Parser.h:
+        (JSC::Scope::getCapturedVariables):
+        * parser/ParserModes.h:
+
+2014-10-09  Joseph Pecoraro  <pecoraro@apple.com>
+
+        Web Inspector: Remove unused generator code
+        https://bugs.webkit.org/show_bug.cgi?id=137564
+
+        Reviewed by Brian Burg.
+
+        * inspector/scripts/codegen/generate_backend_dispatcher_header.py:
+        (BackendDispatcherHeaderGenerator.generate_output): Deleted.
+        * inspector/scripts/codegen/generate_backend_dispatcher_implementation.py:
+        (BackendDispatcherImplementationGenerator.generate_output):
+        * inspector/scripts/codegen/generate_frontend_dispatcher_header.py:
+        (FrontendDispatcherHeaderGenerator.generate_output):
+        * inspector/scripts/codegen/generate_frontend_dispatcher_implementation.py:
+        (FrontendDispatcherImplementationGenerator.generate_output):
+        * inspector/scripts/codegen/generate_protocol_types_header.py:
+        (ProtocolTypesHeaderGenerator.generate_output):
+        * inspector/scripts/codegen/generate_protocol_types_implementation.py:
+        (ProtocolTypesImplementationGenerator.generate_output):
+        inputFilename is now handled by the generic generator base class.
+
+        * inspector/scripts/codegen/models.py:
+        (Framework.fromString):
+        (Frameworks):
+        * inspector/scripts/generate-inspector-protocol-bindings.py:
+        The WTF framework is unused. Remove unexpected frameworks.
+
+2014-10-09  Dean Jackson  <dino@apple.com>
+
+        Remove ENABLE_CSS3_CONDITIONAL_RULES
+        https://bugs.webkit.org/show_bug.cgi?id=137571
+
+        Reviewed by Simon Fraser.
+
+        * Configurations/FeatureDefines.xcconfig:
+
+2014-10-09  Adrien Destugues  <pulkomandy@gmail.com>
+
+        Fix compiler warning on noreturn function
+        https://bugs.webkit.org/show_bug.cgi?id=137558
+
+        Reviewed by Darin Adler.
+
+        The function is marked "noreturn", but the stub implementation does
+        return. No new tests: function is never called. Only fixes a warning.
+
+        * heap/HeapStatistics.cpp:
+        (JSC::HeapStatistics::exitWithFailure):
+
+2014-10-09  Akos Kiss  <akiss@inf.u-szeged.hu>
+
+        Ensure that inline assembly Thunk functions don't conflict with the section designations of the compiler
+        https://bugs.webkit.org/show_bug.cgi?id=137434
+
+        Reviewed by Michael Saboff.
+
+        The ARM64 version of the defineUnaryDoubleOpWrapper macro in
+        ThunkGenerators.cpp contains inline assembly with .text assembler
+        directive followed by a static variable declaration. This macro gets
+        expanded several times afterwards, however, only during the compilation
+        of the first expansion does gcc insert a .data assembler directive
+        before the assembled version of the static variable. Thus, only the
+        first variable gets allocated in the .data section, all the others
+        remain in .text. If JavaScriptCore is built as a shared library then
+        this causes a segmentation fault during dynamic linking.
+
+        This patch puts a .previous directive at the end of the inline assembly
+        to ensure that the assumptions of the compiler about the sections are
+        not broken and the following variable goes to the right place.
+
+        * jit/ThunkGenerators.cpp:
+
+2014-10-08  Oliver Hunt  <oliver@apple.com>
+
+        Make sure arguments tearoff is performed through the environment record if necessary
+        https://bugs.webkit.org/show_bug.cgi?id=137538
+
+        Reviewed by Michael Saboff.
+
+        Fairly simple change.  If we have a lexical record we need to pull the unmodified
+        arguments object from the record and then use the standard op_tear_off_arguments
+        instruction on the temporary.
+
+        * bytecompiler/BytecodeGenerator.cpp:
+        (JSC::BytecodeGenerator::emitGetOwnScope):
+        (JSC::BytecodeGenerator::emitReturn):
+        * bytecompiler/BytecodeGenerator.h:
+
+2014-10-08  peavo@outlook.com  <peavo@outlook.com>
+
+        [WinCairo] Enable JIT on 32-bit.
+        https://bugs.webkit.org/show_bug.cgi?id=137521
+
+        Reviewed by Mark Lam.
+
+        Enable JIT on Windows 32-bit, but disable it at runtime if SSE2 is not present.
+
+        * JavaScriptCore.vcxproj/LLInt/LLIntAssembly/build-LLIntAssembly.pl:
+        * runtime/Options.cpp:
+        (JSC::recomputeDependentOptions):
+
+2014-10-08  Brent Fulgham  <bfulgham@apple.com>
+
+        [Win] Resolve some static analysis warnings in JavaScriptCore
+        https://bugs.webkit.org/show_bug.cgi?id=137508
+
+        Reviewed by Geoffrey Garen.
+
+        * API/tests/testapi.c:
+        (assertEqualsAsCharactersPtr): MSVC insists on using %Iu as its format specifier
+        for size_t. Make the format string conditional on Windows.
+        * bytecode/Watchpoint.h:
+        (JSC::InlineWatchpointSet::encodeState): Silence warning about left-shifting 'state'
+        as a 32-bit value before OR-ing it with a 64-bit value.
+        * dfg/DFGFixupPhase.cpp:
+        (JSC::DFG::FixupPhase::fixupNode): Silence warning about operator prescedence
+        causing the || operation to take place before the >= test.
+        * dfg/DFGInPlaceAbstractState.cpp:
+        (JSC::DFG::InPlaceAbstractState::endBasicBlock): Ditto (|| before !=)
+        * testRegExp.cpp:
+        (testOneRegExp): Ditto %Iu format specifier.
+        * yarr/YarrInterpreter.cpp:
+        (JSC::Yarr::Interpreter::allocParenthesesDisjunctionContext): Silence warning about
+        using a 32-bit value as part of a 64-bit calculation.
+
+2014-10-07  Simon Fraser  <simon.fraser@apple.com>
+
+        Roll-over Changelogs.
+
+        * ChangeLog-2014-10-07: Copied from Source/JavaScriptCore/ChangeLog.
+
+== Rolled over to ChangeLog-2014-10-07 ==
